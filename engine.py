@@ -2,12 +2,13 @@ import os
 import asyncio
 from datetime import datetime, timezone
 import requests
-from modules.generator import SeedGenerator
-from modules.guardian import guardian_gate
+# Direct imports
+from generator import SeedGenerator
+from guardian import guardian_gate
 
 class OrionEngine:
     def __init__(self):
-        self.cycle_interval = 6 * 3600 # 6 Hours
+        self.cycle_interval = 6 * 3600 
         self.ledger_url = os.getenv("LEDGER_URL")
         self.generator = SeedGenerator()
         self.last_cycle_time = None
@@ -19,10 +20,7 @@ class OrionEngine:
 
     async def execute_cycle(self):
         self.last_cycle_time = datetime.now(timezone.utc).isoformat()
-        # 1. Generate candidate seeds from Grok/Anthropic APIs
         seeds = self.generator.generate_all()
-        
-        # 2. Pass through Guardian
         for seed in seeds:
             allowed, reason = guardian_gate(seed)
             if allowed:
