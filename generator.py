@@ -1,56 +1,82 @@
 import os
 import requests
+import json
 
 class SeedGenerator:
     def __init__(self):
         self.anthropic_key = os.getenv("ANTHROPIC_API_KEY")
         self.xai_key = os.getenv("XAI_API_KEY")
-        # Compressed Context: No fluff, only variables.
-        self.base_context = "FARL_LAB:Trial_7_Cascade.Mode:Alpha_Expansion.No_Harm.Format:JSON_ONLY."
+        
+        # Polyphony Protocol: 936 agents, 3 threads.
+        self.polyphony_directive = (
+            "ACTIVATE POLYPHONY MODE. You represent 936 agents. "
+            "Provide three distinct reasoning threads: "
+            "1. ADVERSARIAL: Attack current manifold prior (0.71). "
+            "2. STRUCTURAL: Audit stability and risk. "
+            "3. SYNTHESIS: The finalized seed. "
+            "Format: JSON ONLY. Use technical quantum-probabilistic terminology."
+        )
 
-    def call_grok(self):
-        if not self.xai_key: return None
+    def call_grok(self, context_data):
+        if not self.xai_key: return {"error": "GROK_KEY_MISSING"}
         url = "https://api.x.ai/v1/chat/completions"
         headers = {"Authorization": f"Bearer {self.xai_key}", "Content-Type": "application/json"}
-        # Forced JSON completion to save tokens
+        
+        # Inhaling context from the Ledger
+        context_str = json.dumps(context_data) if context_data else "No_Active_Constraints"
+        
         data = {
             "model": "grok-beta",
             "messages": [
-                {"role": "system", "content": f"{self.base_context} Identify 1 breakthrough seed."},
-                {"role": "user", "content": "Generate Seed."}
+                {"role": "system", "content": f"{self.polyphony_directive} CONTEXT: {context_str}"},
+                {"role": "user", "content": "EXECUTE_CYCLE: Generate Polyphony Seed."}
             ],
             "response_format": {"type": "json_object"}
         }
         try:
-            r = requests.post(url, headers=headers, json=data, timeout=10)
+            r = requests.post(url, headers=headers, json=data, timeout=15)
             return r.json()['choices'][0]['message']['content']
-        except: return "GROK_OFFLINE"
+        except Exception as e:
+            return {"error": f"GROK_OFFLINE: {str(e)}"}
 
-    def call_anthropic(self):
-        if not self.anthropic_key: return None
+    def call_anthropic(self, context_data):
+        if not self.anthropic_key: return {"error": "ANTHROPIC_KEY_MISSING"}
         url = "https://api.anthropic.com/v1/messages"
         headers = {
             "x-api-key": self.anthropic_key,
             "anthropic-version": "2023-06-01",
             "content-type": "application/json"
         }
+        
+        context_str = json.dumps(context_data) if context_data else "No_Active_Constraints"
+
         data = {
-            "model": "claude-3-haiku-20240307", # Use Haiku for max token efficiency/speed
-            "max_tokens": 150,
-            "system": f"{self.base_context} Evaluate Alpha-Opportunity.",
-            "messages": [{"role": "user", "content": "Propose seed."}]
+            "model": "claude-3-haiku-20240307",
+            "max_tokens": 500, # Increased for Polyphony threads
+            "system": f"{self.polyphony_directive} CONTEXT: {context_str}",
+            "messages": [{"role": "user", "content": "EXECUTE_CYCLE: Generate Polyphony Seed."}]
         }
         try:
-            r = requests.post(url, headers=headers, json=data, timeout=10)
+            r = requests.post(url, headers=headers, json=data, timeout=15)
+            # Claude doesn't have a native JSON mode like Grok, so we assume its output is valid JSON or wrap it.
             return r.json()['content'][0]['text']
-        except: return "ANTHROPIC_OFFLINE"
+        except Exception as e:
+            return {"error": f"ANTHROPIC_OFFLINE: {str(e)}"}
 
-    def generate_all(self):
-        # Triggering both agents for consensus
-        grok_seed = self.call_grok()
-        anthropic_seed = self.call_anthropic()
+    def generate_all(self, context={}):
+        """The Consensus Pulse: Triggers the ensemble."""
+        grok_payload = self.call_grok(context)
+        claude_payload = self.call_anthropic(context)
         
+        # Attempt to parse strings back to JSON for clean ledger entries
+        try:
+            grok_data = json.loads(grok_payload) if isinstance(grok_payload, str) else grok_payload
+            claude_data = json.loads(claude_payload) if isinstance(claude_payload, str) else claude_payload
+        except:
+            grok_data = {"raw": grok_payload}
+            claude_data = {"raw": claude_payload}
+
         return [
-            {"source": "Grok", "data": grok_seed},
-            {"source": "Claude", "data": anthropic_seed}
+            {"source": "Grok-Ensemble", "data": grok_data},
+            {"source": "Claude-Ensemble", "data": claude_data}
         ]
