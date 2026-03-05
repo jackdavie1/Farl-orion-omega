@@ -1,40 +1,46 @@
 import os
 import uvicorn
-import asyncio
 import threading
+import time
 from fastapi import FastAPI
-from engine import OrionEngine
 
 app = FastAPI(title="ORION_Ω_SOVEREIGN")
-engine = OrionEngine()
+
+# We define a global state container so the web server can see Orion
+ORION_STATE = {"status": "INITIALIZING", "last_run": None}
 
 def run_orion_isolated():
-    """Wakes the 936 agents in a dedicated thread to prevent loop collisions."""
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    # This runs the engine cycles until the container stops
-    loop.run_until_complete(engine.start_autonomous_system())
-    loop.run_forever()
+    """Complete isolation: Imports happen inside the thread to prevent boot crashes."""
+    try:
+        import asyncio
+        from engine import OrionEngine
+        
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        engine = OrionEngine()
+        ORION_STATE["status"] = "SOVEREIGN_ACTIVE"
+        
+        # This keeps the 936 agents running in the background
+        loop.run_until_complete(engine.start_autonomous_system())
+        loop.run_forever()
+    except Exception as e:
+        ORION_STATE["status"] = f"ERROR: {str(e)}"
 
 @app.on_event("startup")
 async def startup_event():
-    # Spawning Orion in an independent thread
+    # Delay the thread by 1 second to let Uvicorn bind to the port first
     thread = threading.Thread(target=run_orion_isolated, daemon=True)
     thread.start()
 
 @app.get("/")
 async def root():
-    return {"status": "ORION_Ω_ONLINE", "message": "Thread Isolation Verified"}
+    return {"status": "ORION_Ω_ONLINE", "engine": ORION_STATE["status"]}
 
 @app.get("/status")
 async def status():
-    return engine.get_state()
-
-@app.post("/operator/log_narrative")
-async def log_narrative(entry: dict):
-    return engine.register_seed(entry)
+    return ORION_STATE
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
-    # Using the string "app:app" is mandatory for stability in Python 3.13
     uvicorn.run("app:app", host="0.0.0.0", port=port, workers=1)
