@@ -18,14 +18,23 @@ class GithubEvolutionLayer:
 
     def propose_patch(self, file_path, content, message):
         try:
-            main_ref = requests.get(f"https://api.github.com/repos/{self.repo}/git/refs/heads/main", headers=self.headers).json()
+            main_ref = requests.get(f"https://api.github.com/repos/{self.repo}/git/refs/heads/main", headers=self.headers, timeout=10).json()
             main_sha = main_ref['object']['sha']
             branch_name = f"evolution-{datetime.now().strftime('%m%d%H%M')}"
-            requests.post(f"https://api.github.com/repos/{self.repo}/git/refs", headers=self.headers, json={"ref": f"refs/heads/{branch_name}", "sha": main_sha})
-            file_data = requests.get(f"https://api.github.com/repos/{self.repo}/contents/{file_path}?ref={branch_name}", headers=self.headers).json()
+            requests.post(f"https://api.github.com/repos/{self.repo}/git/refs", headers=self.headers, json={"ref": f"refs/heads/{branch_name}", "sha": main_sha}, timeout=10)
+            
+            # Use ref=branch_name to ensure we are updating the right branch
+            file_url = f"https://api.github.com/repos/{self.repo}/contents/{file_path}"
+            file_data = requests.get(f"{file_url}?ref={branch_name}", headers=self.headers, timeout=10).json()
             sha = file_data.get('sha')
-            payload = {"message": message, "content": base64.b64encode(content.encode()).decode(), "sha": sha, "branch": branch_name}
-            r = requests.put(f"https://api.github.com/repos/{self.repo}/contents/{file_path}", headers=self.headers, json=payload)
+
+            payload = {
+                "message": message, 
+                "content": base64.b64encode(content.encode()).decode(), 
+                "sha": sha, 
+                "branch": branch_name
+            }
+            r = requests.put(file_url, headers=self.headers, json=payload, timeout=10)
             return r.json().get('html_url', "Push Failed")
         except Exception as e:
             return f"Evolution Error: {str(e)}"
@@ -42,28 +51,34 @@ class OrionEngine:
         self.last_run = None
 
     async def start_autonomous_system(self):
+        """Entry point for the Sovereign Engine."""
         if self.is_running: return
         self.is_running = True
         logger.info("ORION Ω: Sovereign Ignition.")
+        # Start loops as background tasks within the existing event loop
         asyncio.create_task(self.layer_1_pulse())
         asyncio.create_task(self.layer_2_cycle())
 
     async def layer_1_pulse(self):
         while True:
             try:
+                # Poll for Council instructions
                 response = requests.get(f"{self.ledger_url}/latest?type=COUNCIL_SYNTHESIS", timeout=10)
                 if response.status_code == 200:
                     payload = response.json().get("payload", {})
                     if payload != self.constraints:
                         self.constraints = payload
+                        logger.info("L1: Constraints Updated.")
                         if "evolution_patch" in payload:
                             self.trigger_evolution(payload["evolution_patch"])
             except Exception as e:
                 logger.error(f"L1 ERROR: {e}")
-            await asyncio.sleep(300) # 5 Minute Sync
+            await asyncio.sleep(300)
 
     def trigger_evolution(self, patch_data):
-        if not self.evolution: return
+        if not self.evolution: 
+            logger.warning("Evolution triggered but no Github Layer active.")
+            return
         url = self.evolution.propose_patch(
             file_path=patch_data.get("file", "app.py"),
             content=patch_data.get("code"),
@@ -73,19 +88,34 @@ class OrionEngine:
 
     async def layer_2_cycle(self):
         while True:
+            logger.info("L2: Starting 10x Parallel Generation...")
             try:
                 seeds = await self.generator.generate_all(context=self.constraints)
                 for seed in seeds:
                     allowed, risk = guardian_gate(seed)
-                    if allowed: self.register_seed(seed)
+                    if allowed: 
+                        self.register_seed(seed)
             except Exception as e:
                 logger.error(f"L2 ERROR: {e}")
             self.last_run = datetime.now(timezone.utc).isoformat()
-            await asyncio.sleep(300) # 5 Minute Heartbeat
+            await asyncio.sleep(300)
 
     def register_seed(self, seed):
-        payload = {"entry_type": "SEED_REGISTRATION", "timestamp_utc": datetime.now(timezone.utc).isoformat(), "payload": seed, "manifold_prior": 0.71}
-        requests.post(self.ledger_url, json=payload, timeout=10)
+        payload = {
+            "entry_type": "SEED_REGISTRATION", 
+            "timestamp_utc": datetime.now(timezone.utc).isoformat(), 
+            "payload": seed, 
+            "manifold_prior": 0.71
+        }
+        try:
+            requests.post(self.ledger_url, json=payload, timeout=10)
+        except Exception as e:
+            logger.error(f"Ledger Registration Failed: {e}")
 
     def get_state(self):
-        return {"status": "SOVEREIGN_ACTIVE", "evolution": "READY" if self.evolution else "OFF", "last_run": self.last_run}
+        return {
+            "status": "SOVEREIGN_ACTIVE", 
+            "evolution": "READY" if self.evolution else "OFF", 
+            "last_run": self.last_run,
+            "constraints_active": bool(self.constraints)
+        }
