@@ -37,7 +37,11 @@ class SeedGenerator:
     def call_anthropic(self, context_data):
         if not self.anthropic_key: return {"error": "ANTHROPIC_KEY_MISSING"}
         url = "https://api.anthropic.com/v1/messages"
-        headers = {"x-api-key": self.anthropic_key, "anthropic-version": "2023-06-01", "content-type": "application/json"}
+        headers = {
+            "x-api-key": self.anthropic_key, 
+            "anthropic-version": "2023-06-01", 
+            "content-type": "application/json"
+        }
         context_str = json.dumps(context_data) if context_data else "No_Active_Constraints"
         data = {
             "model": "claude-3-haiku-20240307",
@@ -64,51 +68,10 @@ class SeedGenerator:
         ]
 
     def _parse(self, raw):
-        try: return json.loads(raw) if isinstance(raw, str) else raw
-        except: return {"raw": raw}
-            r = requests.post(url, headers=headers, json=data, timeout=15)
-            return r.json()['choices'][0]['message']['content']
-        except Exception as e:
-            return {"error": f"GROK_OFFLINE: {str(e)}"}
-
-    def call_anthropic(self, context_data):
-        if not self.anthropic_key: return {"error": "ANTHROPIC_KEY_MISSING"}
-        url = "https://api.anthropic.com/v1/messages"
-        headers = {
-            "x-api-key": self.anthropic_key,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json"
-        }
-        
-        context_str = json.dumps(context_data) if context_data else "No_Active_Constraints"
-
-        data = {
-            "model": "claude-3-haiku-20240307",
-            "max_tokens": 500, # Increased for Polyphony threads
-            "system": f"{self.polyphony_directive} CONTEXT: {context_str}",
-            "messages": [{"role": "user", "content": "EXECUTE_CYCLE: Generate Polyphony Seed."}]
-        }
+        """Unified JSON parsing for the ensemble."""
         try:
-            r = requests.post(url, headers=headers, json=data, timeout=15)
-            # Claude doesn't have a native JSON mode like Grok, so we assume its output is valid JSON or wrap it.
-            return r.json()['content'][0]['text']
-        except Exception as e:
-            return {"error": f"ANTHROPIC_OFFLINE: {str(e)}"}
-
-    def generate_all(self, context={}):
-        """The Consensus Pulse: Triggers the ensemble."""
-        grok_payload = self.call_grok(context)
-        claude_payload = self.call_anthropic(context)
-        
-        # Attempt to parse strings back to JSON for clean ledger entries
-        try:
-            grok_data = json.loads(grok_payload) if isinstance(grok_payload, str) else grok_payload
-            claude_data = json.loads(claude_payload) if isinstance(claude_payload, str) else claude_payload
-        except:
-            grok_data = {"raw": grok_payload}
-            claude_data = {"raw": claude_payload}
-
-        return [
-            {"source": "Grok-Ensemble", "data": grok_data},
-            {"source": "Claude-Ensemble", "data": claude_data}
-        ]
+            if isinstance(raw, str):
+                return json.loads(raw)
+            return raw
+        except Exception:
+            return {"raw_output": str(raw)}
