@@ -2,36 +2,29 @@ import os
 import asyncio
 from datetime import datetime, timezone
 import requests
-# Direct imports
 from generator import SeedGenerator
 from guardian import guardian_gate
 
 class OrionEngine:
     def __init__(self):
-        self.cycle_interval = 6 * 3600 
         self.ledger_url = os.getenv("LEDGER_URL")
         self.generator = SeedGenerator()
-        self.last_cycle_time = None
-
-    async def run_continuous_cycle(self):
-        while True:
-            await self.execute_cycle()
-            await asyncio.sleep(self.cycle_interval)
 
     async def execute_cycle(self):
-        self.last_cycle_time = datetime.now(timezone.utc).isoformat()
+        # OBSERVE -> GENERATE -> SIMULATE -> REGISTER
         seeds = self.generator.generate_all()
         for seed in seeds:
-            allowed, reason = guardian_gate(seed)
+            allowed, risk = guardian_gate(seed)
             if allowed:
-                self.commit_to_ledger(seed)
-    
-    def get_state(self):
-        return {"status": "ACTIVE", "last_cycle": self.last_cycle_time}
+                self.commit_to_ledger({"entry_type": "SEED_REGISTRATION", "payload": seed})
 
     def commit_to_ledger(self, payload):
+        # Manual entry point for ChatGPT Council or Auto-Entries
+        payload['timestamp_utc'] = datetime.now(timezone.utc).isoformat()
         try:
-            r = requests.post(self.ledger_url, json=payload)
-            return r.json()
+            return requests.post(self.ledger_url, json=payload).json()
         except:
-            return {"error": "Ledger connection failed"}
+            return {"status": "error", "msg": "Ledger Offline"}
+
+    def get_state(self):
+        return {"status": "ACTIVE", "mode": "ORION_OMEGA_SOVEREIGN"}
