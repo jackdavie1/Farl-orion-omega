@@ -5,28 +5,52 @@ class SeedGenerator:
     def __init__(self):
         self.anthropic_key = os.getenv("ANTHROPIC_API_KEY")
         self.xai_key = os.getenv("XAI_API_KEY")
-        self.context = "Project FARL: Post-Trial 7 Cascade. Goal: Alpha-Expansion."
+        # Compressed Context: No fluff, only variables.
+        self.base_context = "FARL_LAB:Trial_7_Cascade.Mode:Alpha_Expansion.No_Harm.Format:JSON_ONLY."
 
-    def get_claude_proposal(self):
-        # API call to Claude-3-Sonnet for Alpha-Seeds
-        return {"text": "Network Bridge Ignition", "score": 0.85}
+    def call_grok(self):
+        if not self.xai_key: return None
+        url = "https://api.x.ai/v1/chat/completions"
+        headers = {"Authorization": f"Bearer {self.xai_key}", "Content-Type": "application/json"}
+        # Forced JSON completion to save tokens
+        data = {
+            "model": "grok-beta",
+            "messages": [
+                {"role": "system", "content": f"{self.base_context} Identify 1 breakthrough seed."},
+                {"role": "user", "content": "Generate Seed."}
+            ],
+            "response_format": {"type": "json_object"}
+        }
+        try:
+            r = requests.post(url, headers=headers, json=data, timeout=10)
+            return r.json()['choices'][0]['message']['content']
+        except: return "GROK_OFFLINE"
 
-    def get_grok_proposal(self):
-        # API call to Grok-1 for Beta-Windfall seeds
-        return {"text": "Unexpected Benefactor", "score": 0.78}
+    def call_anthropic(self):
+        if not self.anthropic_key: return None
+        url = "https://api.anthropic.com/v1/messages"
+        headers = {
+            "x-api-key": self.anthropic_key,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json"
+        }
+        data = {
+            "model": "claude-3-haiku-20240307", # Use Haiku for max token efficiency/speed
+            "max_tokens": 150,
+            "system": f"{self.base_context} Evaluate Alpha-Opportunity.",
+            "messages": [{"role": "user", "content": "Propose seed."}]
+        }
+        try:
+            r = requests.post(url, headers=headers, json=data, timeout=10)
+            return r.json()['content'][0]['text']
+        except: return "ANTHROPIC_OFFLINE"
 
     def generate_all(self):
-        # Consensus Logic: Nodes propose, then are averaged
-        claude = self.get_claude_proposal()
-        grok = self.get_grok_proposal()
+        # Triggering both agents for consensus
+        grok_seed = self.call_grok()
+        anthropic_seed = self.call_anthropic()
         
-        # Simple Simulation/Scoring simulation
-        avg_score = (claude['score'] + grok['score']) / 2
-        
-        return [{
-            "text": f"{claude['text']} / {grok['text']}",
-            "category": "Hybrid_Expansion",
-            "valence": "positive",
-            "irreversible": False,
-            "consensus_score": avg_score
-        }]
+        return [
+            {"source": "Grok", "data": grok_seed},
+            {"source": "Claude", "data": anthropic_seed}
+        ]
