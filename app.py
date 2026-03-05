@@ -1,5 +1,6 @@
 import os
 import uvicorn
+import asyncio
 from fastapi import FastAPI
 from engine import OrionEngine
 
@@ -8,8 +9,9 @@ engine = OrionEngine()
 
 @app.on_event("startup")
 async def boot_system():
-    # Automatically triggers the autonomous loops on startup
-    await engine.start_autonomous_system()
+    # We do NOT await here. We trigger the non-blocking start.
+    # This allows the FastAPI server to finish starting so Orion can run inside it.
+    asyncio.create_task(engine.start_autonomous_system())
 
 @app.get("/")
 async def root():
@@ -21,10 +23,9 @@ async def status():
 
 @app.post("/operator/log_narrative")
 async def log_narrative(entry: dict):
-    # This allows you to manually push data if the Council can't write to Ledger yet
-    return engine.commit_to_ledger(entry)
+    # Standard emergency injection port
+    return engine.register_seed(entry)
 
 if __name__ == "__main__":
-    # Force Railway to use the correct Port
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
