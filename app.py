@@ -2,16 +2,22 @@ import os
 import uvicorn
 import asyncio
 from fastapi import FastAPI
+from contextlib import asynccontextmanager
 from engine import OrionEngine
 
-app = FastAPI(title="ORION_Ω_SOVEREIGN")
+# Instantiate the Engine
 engine = OrionEngine()
 
-@app.on_event("startup")
-async def boot_system():
-    # We do NOT await here. We trigger the non-blocking start.
-    # This allows the FastAPI server to finish starting so Orion can run inside it.
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # BOOT SEQUENCE: Server is ready, ignite the Engine
     asyncio.create_task(engine.start_autonomous_system())
+    yield
+    # SHUTDOWN SEQUENCE: Clean exit if container restarts
+    engine.is_running = False
+
+# Bind the lifespan to the app
+app = FastAPI(title="ORION_Ω_SOVEREIGN", lifespan=lifespan)
 
 @app.get("/")
 async def root():
@@ -23,9 +29,10 @@ async def status():
 
 @app.post("/operator/log_narrative")
 async def log_narrative(entry: dict):
-    # Standard emergency injection port
+    # Emergency operator injection port
     return engine.register_seed(entry)
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    # Passing "app:app" as a string prevents import blocking
+    uvicorn.run("app:app", host="0.0.0.0", port=port)
