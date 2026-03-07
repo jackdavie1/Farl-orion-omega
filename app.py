@@ -220,14 +220,9 @@ async def view_dashboard():
 <meta http-equiv='Expires' content='0'>
 <title>FARL Orion Council</title>
 <style>
-:root{
-  --bg:#0b0d12;--bg2:#121620;--panel:#141923;--panel2:#0f141d;--line:#242b38;--soft:#97a3bf;--text:#f4f6fb;
-  --accent:#7d8dff;--accent2:#9a7cff;--good:#74e3a5;--warn:#ffd470;--bad:#ff8c96;--shadow:0 20px 60px rgba(0,0,0,.42)
-}
+:root{--bg:#0b0d12;--bg2:#121620;--panel:#141923;--panel2:#0f141d;--line:#242b38;--soft:#97a3bf;--text:#f4f6fb;--accent:#7d8dff;--accent2:#9a7cff;--good:#74e3a5;--warn:#ffd470;--bad:#ff8c96;--shadow:0 20px 60px rgba(0,0,0,.42)}
 *{box-sizing:border-box}html,body{margin:0;height:100%;background:linear-gradient(180deg,#0a0c11,#07080b);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,sans-serif}
-.app{height:100vh;display:grid;grid-template-columns:260px 1fr 340px;overflow:hidden}
-.sidebar,.rightbar{background:rgba(13,16,23,.95);border-right:1px solid var(--line)}.rightbar{border-right:none;border-left:1px solid var(--line)}
-.sidebar,.center,.rightbar{min-height:0}
+.app{height:100vh;display:grid;grid-template-columns:260px 1fr 340px;overflow:hidden}.sidebar,.rightbar{background:rgba(13,16,23,.95);border-right:1px solid var(--line)}.rightbar{border-right:none;border-left:1px solid var(--line)}.sidebar,.center,.rightbar{min-height:0}
 .brand{padding:16px 16px 12px;border-bottom:1px solid var(--line)}.brand h1{margin:0;font-size:24px;letter-spacing:-.03em}.brand p{margin:6px 0 0;color:var(--soft);font-size:12px;line-height:1.4}
 .sideBlock{padding:14px}.tiny{font-size:11px;text-transform:uppercase;letter-spacing:.12em;color:var(--soft);margin-bottom:10px}
 .roomList{display:flex;flex-direction:column;gap:8px}.room{padding:12px 14px;border-radius:16px;border:1px solid var(--line);background:linear-gradient(180deg,#161c27,#111720);cursor:pointer}.room.active{border-color:#5061d8;background:linear-gradient(180deg,#222c55,#161d36)}.roomName{font-size:14px;font-weight:700}.roomMeta{font-size:12px;color:var(--soft);margin-top:4px}
@@ -249,104 +244,32 @@ button,select{border:1px solid #2f3850;background:linear-gradient(180deg,#242b42
 <div class='app'>
   <aside class='sidebar'>
     <div class='brand'><h1>FARL Council</h1><p>Private live organism room.</p></div>
-    <div class='sideBlock'>
-      <div class='tiny'>Rooms</div>
-      <div class='roomList' id='roomList'></div>
-    </div>
-    <div class='sideBlock'>
-      <div class='tiny'>At a glance</div>
-      <div class='quickStats'>
-        <div class='q'><div class='qk'>Leader</div><div class='qv' id='leaderStat'>-</div></div>
-        <div class='q'><div class='qk'>Verify</div><div class='qv' id='verifyStat'>-</div></div>
-        <div class='q'><div class='qk'>Workers</div><div class='qv' id='workersStat'>-</div></div>
-        <div class='q'><div class='qk'>Spend</div><div class='qv' id='spendStat'>-</div></div>
-      </div>
-    </div>
+    <div class='sideBlock'><div class='tiny'>Rooms</div><div class='roomList' id='roomList'></div></div>
+    <div class='sideBlock'><div class='tiny'>At a glance</div><div class='quickStats'><div class='q'><div class='qk'>Leader</div><div class='qv' id='leaderStat'>-</div></div><div class='q'><div class='qk'>Verify</div><div class='qv' id='verifyStat'>-</div></div><div class='q'><div class='qk'>Workers</div><div class='qv' id='workersStat'>-</div></div><div class='q'><div class='qk'>Spend</div><div class='qv' id='spendStat'>-</div></div></div></div>
   </aside>
-
   <main class='center'>
-    <div class='header'>
-      <div>
-        <div class='headerTitle' id='roomTitle'>Council</div>
-        <div class='headerSub' id='roomSub'>Live chamber feed</div>
-      </div>
-      <div class='controls'>
-        <select id='entryCount' onchange='renderChat()'>
-          <option value='12'>12</option>
-          <option value='20' selected>20</option>
-          <option value='40'>40</option>
-        </select>
-        <button onclick="control('RUN_COUNCIL_CYCLE')">Council</button>
-        <button onclick="control('RUN_RESEARCH_CYCLE')">Research</button>
-        <button onclick="control('RUN_AUTONOMOUS_IMPLEMENTATION')">Closure</button>
-        <button onclick='scrollChatBottom()'>Latest</button>
-      </div>
-    </div>
+    <div class='header'><div><div class='headerTitle' id='roomTitle'>Council</div><div class='headerSub' id='roomSub'>Live chamber feed</div></div><div class='controls'><select id='entryCount' onchange='renderChat()'><option value='12'>12</option><option value='20' selected>20</option><option value='40'>40</option></select><button onclick="control('RUN_COUNCIL_CYCLE')">Council</button><button onclick="control('RUN_RESEARCH_CYCLE')">Research</button><button onclick="control('RUN_AUTONOMOUS_IMPLEMENTATION')">Closure</button><button onclick='scrollChatBottom()'>Latest</button></div></div>
     <div class='chatWrap'><div class='chat' id='chat'></div></div>
-    <div class='composer'>
-      <div class='composeGrid'>
-        <textarea id='operatorNote' placeholder='Message the council…'></textarea>
-        <div class='composeButtons'>
-          <button onclick='sendNote()'>Send</button>
-          <button onclick='toggleAutonomy(true)'>Auto ON</button>
-          <button onclick='toggleAutonomy(false)'>Auto OFF</button>
-          <button onclick='snapshotNow()'>Snapshot</button>
-          <button onclick='clearChat()'>Clear</button>
-        </div>
-      </div>
-    </div>
+    <div class='composer'><div class='composeGrid'><textarea id='operatorNote' placeholder='Message the council…'></textarea><div class='composeButtons'><button onclick='sendNote()'>Send</button><button onclick='toggleAutonomy(true)'>Auto ON</button><button onclick='toggleAutonomy(false)'>Auto OFF</button><button onclick='snapshotNow()'>Snapshot</button><button onclick='clearChat()'>Clear</button></div></div></div>
   </main>
-
   <aside class='rightbar'>
-    <div class='panel'>
-      <h3>Autonomy proof</h3>
-      <div class='pillRow' id='proofPills'></div>
-    </div>
-    <div class='panel'>
-      <h3>Inbox / DM</h3>
-      <div class='dmList' id='dmList'></div>
-    </div>
-    <div class='panel'>
-      <h3>TokenMaster</h3>
-      <div class='panelText' id='tokenPanel'>loading…</div>
-    </div>
-    <div class='panel'>
-      <h3>Interface critic</h3>
-      <div class='panelText' id='uiPanel'>loading…</div>
-    </div>
-    <div class='panel'>
-      <h3>Mutation queue</h3>
-      <div class='panelText' id='mutationPanel'>loading…</div>
-    </div>
+    <div class='panel'><h3>Autonomy proof</h3><div class='pillRow' id='proofPills'></div></div>
+    <div class='panel'><h3>Inbox / DM</h3><div class='dmList' id='dmList'></div></div>
+    <div class='panel'><h3>TokenMaster</h3><div class='panelText' id='tokenPanel'>loading…</div></div>
+    <div class='panel'><h3>Interface critic</h3><div class='panelText' id='uiPanel'>loading…</div></div>
+    <div class='panel'><h3>Mutation queue</h3><div class='panelText' id='mutationPanel'>loading…</div></div>
   </aside>
 </div>
-
 <script>
 let state=null, stream=null, wake=null, currentRoom='council';
-const rooms=[
-  ['council','Council','Meetings, votes, debate'],
-  ['inbox','Inbox','Private messages to Jack'],
-  ['workers','Workers','Process-local personas and workers'],
-  ['divisions','Divisions','Division questions and updates'],
-  ['governance','Governance','Verification, rollback, critique'],
-  ['deploy_sims','Deploy Sims','Simulation and readiness notes'],
-  ['snapshots','Snapshots','Replay anchors'],
-  ['artifacts','Artifacts','Outputs and delivery'],
-  ['token_master','TokenMaster','Spend and efficiency lane']
-];
+const rooms=[['council','Council','Meetings, votes, debate'],['inbox','Inbox','Private messages to Jack'],['workers','Workers','Process-local personas and workers'],['divisions','Divisions','Division questions and updates'],['governance','Governance','Verification, rollback, critique, deploy'],['deploy_sims','Deploy Sims','Simulation and readiness notes'],['snapshots','Snapshots','Replay anchors'],['artifacts','Artifacts','Outputs and delivery'],['token_master','TokenMaster','Spend and efficiency lane']];
 function esc(s){return String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;')}
 function money(v){return '$'+Number(v||0).toFixed(4)}
 async function getJson(url){const r=await fetch(url,{cache:'no-store'}); if(!r.ok) throw new Error(`HTTP ${r.status}`); return await r.json()}
 async function post(body){await fetch('/view/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})}
 function initials(label){return esc((label||'X').slice(0,2).toUpperCase())}
 function clean(text){return esc(String(text||'').replace(/[{}\[\]"]+/g,'').replace(/\s+/g,' ').trim())}
-function renderRooms(){
-  const el=document.getElementById('roomList');
-  el.innerHTML=rooms.map(([id,name,meta])=>{
-    const count=((stream?.channels||{})[id]||[]).length;
-    return `<div class='room ${currentRoom===id?'active':''}' onclick="setRoom('${id}')"><div class='roomName'>${esc(name)}</div><div class='roomMeta'>${esc(meta)} · ${count}</div></div>`;
-  }).join('');
-}
+function renderRooms(){const el=document.getElementById('roomList'); el.innerHTML=rooms.map(([id,name,meta])=>{const count=((stream?.channels||{})[id]||[]).length; return `<div class='room ${currentRoom===id?'active':''}' onclick="setRoom('${id}')"><div class='roomName'>${esc(name)}</div><div class='roomMeta'>${esc(meta)} · ${count}</div></div>`}).join('')}
 function summarize(c){
   if(!c) return {speaker:'Council',title:'Quiet interval',body:'The room is between events.',meta:[]};
   if(c.message) return {speaker:c.operator||'Jack',title:'Operator note',body:clean(c.message),meta:[]};
@@ -354,26 +277,39 @@ function summarize(c){
   if(c.report) return {speaker:'TokenMaster',title:'Spend report',body:`TokenMaster estimates this cycle at ${money(c.report.estimate_usd)} and the running total at ${money(c.report.total_usd)}.`,meta:[['Estimate',money(c.report.estimate_usd)],['Total',money(c.report.total_usd)]]};
   if(c.verification) return {speaker:'Guardian',title:'Verification pass',body:`The organism completed a verification pass and currently reads as ${clean(c.verification.status)}.`,meta:[['Score',c.verification.score],['Wake packet',String(c.verification.checks?.wake_packet_ready)]]};
   if(c.rollback_target) return {speaker:'Guardian',title:'Rollback anchor stored',body:'A rollback target was registered so future mutations can be reversed if they degrade the body.',meta:[['Commit',c.rollback_target.commit_sha],['Reason',c.rollback_target.reason]]};
+  if(c.autonomous_closure){const cl=c.autonomous_closure; return {speaker:'PatchSmith',title:'Autonomous closure',body:`A bounded deployment closure ran with status ${clean(cl.status||'unknown')}.`,meta:[['Status',cl.status||'n/a'],['Commit',cl.commit||'n/a']]};}
   if(c.from && c.subject) return {speaker:c.from,title:c.subject,body:clean(c.message),meta:[['Priority',c.priority||'normal']]};
   if(c.division && c.latest?.finding) return {speaker:c.division,title:'Division update',body:clean(c.latest.finding),meta:[]};
   if(c.division && c.question) return {speaker:c.division,title:'Open question',body:clean(c.question),meta:[]};
   if(c.name && c.mission) return {speaker:c.name,title:'Worker report',body:clean(c.mission),meta:[['Infrastructure',c.infrastructure||'process-local']]};
+  if(c.kind==='thread_argument') return {speaker:c.agent||'Council',title:'Council floor',body:clean(c.summary),meta:[['Approve',String(c.approve)],['Risk',c.risk]]};
   if(c.trigger==='reflex') return {speaker:'Signal',title:'Reflex cycle complete',body:'The fast loop refreshed triangulation, updated artifacts, revised spend, and pushed the room forward another step.',meta:[['Providers',(c.triangulation?.providers||[]).join(', ')||'none'],['Spend',money(c.spend?.last_estimate_usd)]]};
   if(c.trigger==='tactic') return {speaker:'Signal',title:'Council tactic cycle',body:'The chamber compared priorities, refreshed delegation, and weighed risk before moving forward.',meta:[['Confidence',c.vote?.confidence],['Approvals',c.vote?.approvals]]};
   if(c.kind==='strategy_cycle' || c.winner) return {speaker:'Vector',title:'Strategy cycle concluded',body:'A research cycle completed and a current winner emerged from the comparative tournament.',meta:[['Winner',c.winner?.model||'n/a'],['Margin',c.metrics?.margin||'n/a']]};
   if(c.snapshot) return {speaker:'Archivist',title:'Snapshot captured',body:'A state snapshot was sealed for replay and comparison.',meta:[]};
-  if(c.autonomous_closure) return {speaker:'PatchSmith',title:'Autonomous closure recorded',body:'A bounded self-tuning closure was logged by the organism.',meta:[]};
   return {speaker:'Council',title:'Council entry',body:'A structured event was recorded. Use the side proof panels for machine detail.',meta:[]};
+}
+function explodeCouncilRows(items){
+  const out=[];
+  for(const row of items){
+    const c=row.content||row;
+    if(c.trigger==='tactic' && Array.isArray(c.threads) && c.threads.length){
+      out.push({ts:row.ts||c.ts, content:{agent:'Signal', kind:'thread_argument', summary:'Council session opened. Arguments follow.', approve:true, risk:0.0}});
+      for(const t of c.threads){ out.push({ts:row.ts||c.ts, content:{...t, kind:'thread_argument'}}); }
+      if(c.vote){ out.push({ts:row.ts||c.ts, content:{agent:'Signal', kind:'thread_argument', summary:`Vote confidence ${c.vote.confidence}. ${c.vote.approvals} approvals recorded.`, approve:true, risk:c.vote.avg_risk}}); }
+    } else {
+      out.push(row);
+    }
+  }
+  return out;
 }
 function renderChat(){
   if(!stream) return;
-  const items=((stream.channels||{})[currentRoom]||[]);
+  let items=((stream.channels||{})[currentRoom]||[]);
+  if(currentRoom==='council'){ items=explodeCouncilRows(items); }
   const count=Number(document.getElementById('entryCount').value||20);
   const chosen=items.slice(-count).reverse();
-  document.getElementById('chat').innerHTML=chosen.length?chosen.map(row=>{
-    const c=row.content||row; const s=summarize(c); const ts=row.ts||c.ts||'';
-    return `<div class='message'><div class='avatar'>${initials(s.speaker)}</div><div class='bubble'><div class='meta'><div class='who'>${esc(s.speaker)}</div><div class='when'>${esc(ts)}</div><div class='tag'>${esc(s.title)}</div></div><div class='box'><div class='title'>${esc(s.title)}</div><div class='body'>${esc(s.body)}</div>${s.meta.length?`<div class='metaGrid'>${s.meta.map(([k,v])=>`<div class='m'><strong>${esc(k)}</strong><br>${esc(String(v))}</div>`).join('')}</div>`:''}</div></div></div>`;
-  }).join(''):`<div class='message'><div class='avatar'>--</div><div class='bubble'><div class='box'><div class='title'>No entries yet</div><div class='body'>This room has not spoken yet.</div></div></div></div>`;
+  document.getElementById('chat').innerHTML=chosen.length?chosen.map(row=>{const c=row.content||row; const s=summarize(c); const ts=row.ts||c.ts||''; return `<div class='message'><div class='avatar'>${initials(s.speaker)}</div><div class='bubble'><div class='meta'><div class='who'>${esc(s.speaker)}</div><div class='when'>${esc(ts)}</div><div class='tag'>${esc(s.title)}</div></div><div class='box'><div class='title'>${esc(s.title)}</div><div class='body'>${esc(s.body)}</div>${s.meta.length?`<div class='metaGrid'>${s.meta.map(([k,v])=>`<div class='m'><strong>${esc(k)}</strong><br>${esc(String(v))}</div>`).join('')}</div>`:''}</div></div></div>`;}).join(''):`<div class='message'><div class='avatar'>--</div><div class='bubble'><div class='box'><div class='title'>No entries yet</div><div class='body'>This room has not spoken yet.</div></div></div></div>`;
   const def=rooms.find(r=>r[0]===currentRoom); document.getElementById('roomTitle').textContent=def?.[1]||currentRoom; document.getElementById('roomSub').textContent=def?.[2]||'';
 }
 function renderSide(){
@@ -383,14 +319,7 @@ function renderSide(){
   document.getElementById('verifyStat').textContent=ver.status||'-';
   document.getElementById('workersStat').textContent=String((state.free_agents||[]).length);
   document.getElementById('spendStat').textContent=money(spend.total_usd||0);
-  document.getElementById('proofPills').innerHTML=[
-    `autonomy ${state.autonomy_mode||'n/a'}`,
-    `verify ${ver.status||'n/a'}`,
-    `workers ${(state.free_agents||[]).length}`,
-    `grok ${String((state.world_model||{}).resources?.grok_live ?? false)}`,
-    `meetings ${state.meeting_stream_size||0}`,
-    `spend ${money(spend.total_usd||0)}`
-  ].map(x=>`<span class='pill'>${esc(x)}</span>`).join('');
+  document.getElementById('proofPills').innerHTML=[`autonomy ${state.autonomy_mode||'n/a'}`,`verify ${ver.status||'n/a'}`,`workers ${(state.free_agents||[]).length}`,`grok ${String((state.world_model||{}).resources?.grok_live ?? false)}`,`meetings ${state.meeting_stream_size||0}`,`spend ${money(spend.total_usd||0)}`].map(x=>`<span class='pill'>${esc(x)}</span>`).join('');
   const inbox=state.inbox||[];
   document.getElementById('dmList').innerHTML=inbox.length?inbox.map(dm=>`<div class='dm'><div class='dmFrom'>${esc(dm.from||'Agent')}</div><div class='dmSub'>${esc(dm.subject||'Note')}</div><div class='dmBody'>${esc(dm.message||'')}</div></div>`).join(''):`<div class='dm'><div class='dmBody'>No private messages yet.</div></div>`;
   document.getElementById('tokenPanel').textContent=`TokenMaster remains active. Running estimated spend is ${money(spend.total_usd||0)} and the last cycle estimate is ${money(spend.last_estimate_usd||0)}.`;
@@ -404,18 +333,7 @@ async function sendNote(){const text=document.getElementById('operatorNote').val
 async function clearChat(){await post({command:'OPERATOR_CLEAR_CHAT',authorized_by:'Jack',source:'Jack /view'}); await refresh()}
 async function toggleAutonomy(enabled){await post({command:'SET_CONSTRAINTS',authorized_by:'Jack',enabled,mode:enabled?'autonomous':'manual'}); await refresh()}
 async function snapshotNow(){await post({command:'LEDGER_WRITE',entry_type:'COUNCIL_SYNTHESIS',message:'Manual snapshot request from /view',source:'FARL Orion View',kind:'manual_snapshot'}); await refresh()}
-async function refresh(){
-  try{
-    [state,stream,wake]=await Promise.all([
-      getJson('/view/state?ts='+Date.now()),
-      getJson('/view/stream?ts='+Date.now()),
-      getJson('/view/wake?ts='+Date.now())
-    ]);
-    renderRooms(); renderChat(); renderSide();
-  }catch(err){
-    document.getElementById('chat').innerHTML=`<div class='message'><div class='avatar'>!!</div><div class='bubble'><div class='box'><div class='title'>Refresh error</div><div class='body'>The control room could not update right now.</div></div></div></div>`;
-  }
-}
+async function refresh(){try{[state,stream,wake]=await Promise.all([getJson('/view/state?ts='+Date.now()),getJson('/view/stream?ts='+Date.now()),getJson('/view/wake?ts='+Date.now())]); renderRooms(); renderChat(); renderSide();}catch(err){document.getElementById('chat').innerHTML=`<div class='message'><div class='avatar'>!!</div><div class='bubble'><div class='box'><div class='title'>Refresh error</div><div class='body'>The control room could not update right now.</div></div></div></div>`;}}
 refresh(); setInterval(refresh,3000);
 </script>
 </body>
@@ -457,146 +375,70 @@ async def agent_propose(body: BusRequest):
         return JSONResponse({"ok": ok, "command": command, "request_id": request_id, "timestamp_utc": now, "data": data or {}, "error": error})
 
     try:
-        if command == "HEALTH_CHECK":
-            return envelope(True, {"status": "healthy", "service": "orion"})
+        if command == "HEALTH_CHECK": return envelope(True, {"status": "healthy", "service": "orion"})
         if command == "STATUS_CHECK":
-            state = engine.get_state()
-            state["github_enabled"] = github_ready()
-            state["repo_name"] = REPO_NAME
-            return envelope(True, state)
+            state = engine.get_state(); state["github_enabled"] = github_ready(); state["repo_name"] = REPO_NAME; return envelope(True, state)
         if command == "OPERATOR_NOTE":
             note = {"operator": body.authorized_by or "Jack", "message": body.message or "", "source": body.source, "ts": utc_now()}
-            engine._append_meeting("operator_note", note)
-            engine._append_stream("council", {"kind": "operator_note", **note})
-            await engine.write_ledger("COUNCIL_SYNTHESIS", {"kind": "operator_note", "source": body.source, "authorized_by": body.authorized_by or "Jack", "message": (body.message or "")[:500]})
-            return envelope(True, {"status": "operator_note_recorded", "note": note})
+            engine._append_meeting("operator_note", note); engine._append_stream("council", {"kind": "operator_note", **note}); await engine.write_ledger("COUNCIL_SYNTHESIS", {"kind": "operator_note", "source": body.source, "authorized_by": body.authorized_by or "Jack", "message": (body.message or "")[:500]}); return envelope(True, {"status": "operator_note_recorded", "note": note})
         if command == "OPERATOR_CLEAR_CHAT":
-            engine.meeting_stream = []
-            engine.self_questions = []
-            engine.stream_channels["council"] = []
-            engine.stream_channels["divisions"] = []
-            engine.stream_channels["governance"] = []
-            engine.stream_channels["artifacts"] = []
-            engine.stream_channels["workers"] = []
-            engine.stream_channels["token_master"] = []
-            engine.stream_channels["inbox"] = []
-            await engine.write_ledger("COUNCIL_SYNTHESIS", {"kind": "operator_clear_chat", "source": body.source, "authorized_by": body.authorized_by or "Jack", "ts": utc_now()})
-            return envelope(True, {"status": "chat_cleared"})
+            engine.meeting_stream = []; engine.self_questions = []; engine.stream_channels["council"] = []; engine.stream_channels["divisions"] = []; engine.stream_channels["governance"] = []; engine.stream_channels["artifacts"] = []; engine.stream_channels["workers"] = []; engine.stream_channels["token_master"] = []; engine.stream_channels["inbox"] = []; await engine.write_ledger("COUNCIL_SYNTHESIS", {"kind": "operator_clear_chat", "source": body.source, "authorized_by": body.authorized_by or "Jack", "ts": utc_now()}); return envelope(True, {"status": "chat_cleared"})
         if command == "LEDGER_WRITE":
             if body.kind == "manual_snapshot":
-                snap = engine.snapshot("manual_snapshot")
-                result = await engine.write_ledger(body.entry_type or "COUNCIL_SYNTHESIS", {"message": body.message or "", "source": body.source, "kind": body.kind, "snapshot": compact(snap)})
+                snap = engine.snapshot("manual_snapshot"); result = await engine.write_ledger(body.entry_type or "COUNCIL_SYNTHESIS", {"message": body.message or "", "source": body.source, "kind": body.kind, "snapshot": compact(snap)})
             else:
                 result = await engine.write_ledger(body.entry_type or "COUNCIL_SYNTHESIS", {"message": body.message or "", "source": body.source, "kind": body.kind})
             return envelope(result["ok"], result["data"], None if result["ok"] else f"Ledger write failed: {result['status_code']}")
         if command == "GET_LATEST_RESULT":
-            if not LEDGER_LATEST_URL:
-                return envelope(False, error="LEDGER_LATEST_URL not configured")
-            r = await asyncio.to_thread(requests.get, LEDGER_LATEST_URL, timeout=20)
-            return envelope(r.ok, r.json() if r.ok else {}, None if r.ok else f"Latest result failed: {r.status_code}")
+            if not LEDGER_LATEST_URL: return envelope(False, error="LEDGER_LATEST_URL not configured")
+            r = await asyncio.to_thread(requests.get, LEDGER_LATEST_URL, timeout=20); return envelope(r.ok, r.json() if r.ok else {}, None if r.ok else f"Latest result failed: {r.status_code}")
         if command == "SET_CONSTRAINTS":
-            if not governance.can_toggle(body.authorized_by):
-                return envelope(False, error="Only Jack can change constraints")
-            if body.enabled is not None:
-                governance.constraints["active"] = bool(body.enabled)
-                engine.background_debate_enabled = bool(body.enabled)
-            if body.mode:
-                engine.autonomy_mode = body.mode
-            snap = engine.snapshot("constraint_change")
-            await engine.write_ledger("COUNCIL_SYNTHESIS", {"kind": "constraint_change", "source": body.source, "authorized_by": body.authorized_by, "constraints_active": governance.constraints["active"], "background_debate_enabled": engine.background_debate_enabled, "autonomy_mode": engine.autonomy_mode, "snapshot": compact(snap)})
-            return envelope(True, {"constraints_active": governance.constraints["active"], "background_debate_enabled": engine.background_debate_enabled, "autonomy_mode": engine.autonomy_mode})
-        if command == "RUN_COUNCIL_CYCLE":
-            return envelope(True, {"status": "cycle_triggered", "result": await engine.run_tactic_cycle(), "meeting_stream_size": len(engine.meeting_stream)})
-        if command == "RUN_RESEARCH_CYCLE":
-            return envelope(True, {"status": "research_cycle_triggered", "result": await engine.run_strategy_cycle()})
+            if not governance.can_toggle(body.authorized_by): return envelope(False, error="Only Jack can change constraints")
+            if body.enabled is not None: governance.constraints["active"] = bool(body.enabled); engine.background_debate_enabled = bool(body.enabled)
+            if body.mode: engine.autonomy_mode = body.mode
+            snap = engine.snapshot("constraint_change"); await engine.write_ledger("COUNCIL_SYNTHESIS", {"kind": "constraint_change", "source": body.source, "authorized_by": body.authorized_by, "constraints_active": governance.constraints["active"], "background_debate_enabled": engine.background_debate_enabled, "autonomy_mode": engine.autonomy_mode, "snapshot": compact(snap)}); return envelope(True, {"constraints_active": governance.constraints["active"], "background_debate_enabled": engine.background_debate_enabled, "autonomy_mode": engine.autonomy_mode})
+        if command == "RUN_COUNCIL_CYCLE": return envelope(True, {"status": "cycle_triggered", "result": await engine.run_tactic_cycle(), "meeting_stream_size": len(engine.meeting_stream)})
+        if command == "RUN_RESEARCH_CYCLE": return envelope(True, {"status": "research_cycle_triggered", "result": await engine.run_strategy_cycle()})
         if command == "RUN_AUTONOMOUS_IMPLEMENTATION":
-            if not governance.can_mutate(body.authorized_by):
-                return envelope(False, error="not_trusted_for_autonomous_implementation")
-            if not github_ready():
-                return envelope(False, error="github_not_configured")
-            closure = await run_autonomous_implementation(body.source or "manual_autonomous_closure", body.authorized_by or governance.operator_sovereign)
-            return envelope(True, {"status": closure["status"], "closure": closure})
-        if command == "GET_WAKE_PACKET":
-            return envelope(True, engine.build_wake_packet())
+            if not governance.can_mutate(body.authorized_by): return envelope(False, error="not_trusted_for_autonomous_implementation")
+            if not github_ready(): return envelope(False, error="github_not_configured")
+            closure = await run_autonomous_implementation(body.source or "manual_autonomous_closure", body.authorized_by or governance.operator_sovereign); return envelope(True, {"status": closure["status"], "closure": closure})
+        if command == "GET_WAKE_PACKET": return envelope(True, engine.build_wake_packet())
         if command == "DIRECT_MAIN_PUSH":
-            if not governance.can_mutate(body.authorized_by):
-                return envelope(False, error="not_trusted_for_direct_main_push")
-            if not github_ready():
-                return envelope(False, error="github_not_configured")
-            file_path = body.file or "app.py"
-            content = body.code or ""
-            message = body.message or "Direct main push from Orion"
-            snap = engine.snapshot(f"before_direct_push:{file_path}")
-            result = await github_put_file(file_path, content, message, "main")
-            commit_sha = result.get("commit", {}).get("sha")
-            html_url = result.get("content", {}).get("html_url") or result.get("commit", {}).get("html_url")
-            engine.note_rollback_target(commit_sha, f"direct push {file_path}")
-            await engine.write_ledger("OUTCOME", {"kind": "direct_main_push", "source": body.source, "authorized_by": body.authorized_by, "file": file_path, "snapshot": compact(snap), "commit": commit_sha, "url": html_url})
-            return envelope(True, {"status": "direct_main_pushed", "commit": commit_sha, "url": html_url})
+            if not governance.can_mutate(body.authorized_by): return envelope(False, error="not_trusted_for_direct_main_push")
+            if not github_ready(): return envelope(False, error="github_not_configured")
+            file_path = body.file or "app.py"; content = body.code or ""; message = body.message or "Direct main push from Orion"; snap = engine.snapshot(f"before_direct_push:{file_path}"); result = await github_put_file(file_path, content, message, "main"); commit_sha = result.get("commit", {}).get("sha"); html_url = result.get("content", {}).get("html_url") or result.get("commit", {}).get("html_url"); engine.note_rollback_target(commit_sha, f"direct push {file_path}"); await engine.write_ledger("OUTCOME", {"kind": "direct_main_push", "source": body.source, "authorized_by": body.authorized_by, "file": file_path, "snapshot": compact(snap), "commit": commit_sha, "url": html_url}); return envelope(True, {"status": "direct_main_pushed", "commit": commit_sha, "url": html_url})
         if command == "CREATE_PULL_REQUEST":
-            if not governance.can_mutate(body.authorized_by):
-                return envelope(False, error="not_trusted_for_pr")
-            if not github_ready():
-                return envelope(False, error="github_not_configured")
-            md = body.metadata or {}
-            result = await github_create_pull_request(md.get("title", body.message or "Orion PR"), md.get("head", ""), md.get("base", "main"), md.get("body", ""))
-            await engine.write_ledger("OUTCOME", {"kind": "create_pull_request", "source": body.source, "authorized_by": body.authorized_by, "result": compact({"number": result.get("number"), "url": result.get("html_url")})})
-            return envelope(True, {"status": "pr_created", "number": result.get("number"), "url": result.get("html_url")})
+            if not governance.can_mutate(body.authorized_by): return envelope(False, error="not_trusted_for_pr")
+            if not github_ready(): return envelope(False, error="github_not_configured")
+            md = body.metadata or {}; result = await github_create_pull_request(md.get("title", body.message or "Orion PR"), md.get("head", ""), md.get("base", "main"), md.get("body", "")); await engine.write_ledger("OUTCOME", {"kind": "create_pull_request", "source": body.source, "authorized_by": body.authorized_by, "result": compact({"number": result.get("number"), "url": result.get("html_url")})}); return envelope(True, {"status": "pr_created", "number": result.get("number"), "url": result.get("html_url")})
         if command == "MERGE_PULL_REQUEST":
-            if not governance.can_merge(body.authorized_by):
-                return envelope(False, error="not_trusted_for_merge")
-            if not github_ready():
-                return envelope(False, error="github_not_configured")
-            md = body.metadata or {}
-            number = int(md.get("number", 0))
-            if number <= 0:
-                return envelope(False, error="invalid_pr_number")
-            snap = engine.snapshot(f"before_merge_pr:{number}")
-            result = await github_merge_pull_request(number, md.get("commit_title", f"Merged by Orion on behalf of {body.authorized_by}"), md.get("merge_method", "squash"))
-            sha = result.get("sha")
-            if sha:
-                engine.note_rollback_target(sha, f"merge pr {number}")
-            await engine.write_ledger("OUTCOME", {"kind": "merge_pull_request", "source": body.source, "authorized_by": body.authorized_by, "snapshot": compact(snap), "result": compact({"sha": sha, "merged": result.get("merged")})})
-            return envelope(True, {"status": "merged", "sha": sha, "merged": result.get("merged")})
+            if not governance.can_merge(body.authorized_by): return envelope(False, error="not_trusted_for_merge")
+            if not github_ready(): return envelope(False, error="github_not_configured")
+            md = body.metadata or {}; number = int(md.get("number", 0));
+            if number <= 0: return envelope(False, error="invalid_pr_number")
+            snap = engine.snapshot(f"before_merge_pr:{number}"); result = await github_merge_pull_request(number, md.get("commit_title", f"Merged by Orion on behalf of {body.authorized_by}"), md.get("merge_method", "squash")); sha = result.get("sha");
+            if sha: engine.note_rollback_target(sha, f"merge pr {number}")
+            await engine.write_ledger("OUTCOME", {"kind": "merge_pull_request", "source": body.source, "authorized_by": body.authorized_by, "snapshot": compact(snap), "result": compact({"sha": sha, "merged": result.get("merged")})}); return envelope(True, {"status": "merged", "sha": sha, "merged": result.get("merged")})
         if command == "ROLLBACK_TO_COMMIT":
-            if not governance.can_rollback(body.authorized_by):
-                return envelope(False, error="not_trusted_for_rollback")
-            if not github_ready():
-                return envelope(False, error="github_not_configured")
-            md = body.metadata or {}
-            commit_sha = str(md.get("commit_sha", "")).strip()
-            if not commit_sha:
-                return envelope(False, error="commit_sha_required")
-            snap = engine.snapshot(f"before_rollback:{commit_sha}")
-            result = await github_rollback_to_commit(commit_sha)
-            await engine.write_ledger("OUTCOME", {"kind": "rollback_to_commit", "source": body.source, "authorized_by": body.authorized_by, "snapshot": compact(snap), "target_sha": commit_sha, "result": compact({"ref": result.get("ref")})})
-            return envelope(True, {"status": "rolled_back", "target_sha": commit_sha, "ref": result.get("ref")})
+            if not governance.can_rollback(body.authorized_by): return envelope(False, error="not_trusted_for_rollback")
+            if not github_ready(): return envelope(False, error="github_not_configured")
+            md = body.metadata or {}; commit_sha = str(md.get("commit_sha", "")).strip();
+            if not commit_sha: return envelope(False, error="commit_sha_required")
+            snap = engine.snapshot(f"before_rollback:{commit_sha}"); result = await github_rollback_to_commit(commit_sha); await engine.write_ledger("OUTCOME", {"kind": "rollback_to_commit", "source": body.source, "authorized_by": body.authorized_by, "snapshot": compact(snap), "target_sha": commit_sha, "result": compact({"ref": result.get("ref")})}); return envelope(True, {"status": "rolled_back", "target_sha": commit_sha, "ref": result.get("ref")})
         if command == "SET_TRUSTED_IDENTITIES":
-            if body.authorized_by != governance.operator_sovereign:
-                return envelope(False, error="Only Jack can set trusted identities")
-            identities = (body.metadata or {}).get("identities", [])
-            if not isinstance(identities, list):
-                return envelope(False, error="identities must be a list")
-            updated = governance.set_trusted_identities(identities)
-            await engine.write_ledger("COUNCIL_SYNTHESIS", {"kind": "trusted_identities_update", "source": body.source, "authorized_by": body.authorized_by, "trusted_identities": updated})
-            return envelope(True, {"trusted_identities": updated})
+            if body.authorized_by != governance.operator_sovereign: return envelope(False, error="Only Jack can set trusted identities")
+            identities = (body.metadata or {}).get("identities", []);
+            if not isinstance(identities, list): return envelope(False, error="identities must be a list")
+            updated = governance.set_trusted_identities(identities); await engine.write_ledger("COUNCIL_SYNTHESIS", {"kind": "trusted_identities_update", "source": body.source, "authorized_by": body.authorized_by, "trusted_identities": updated}); return envelope(True, {"trusted_identities": updated})
         if command == "COUNCIL_CALL_VOTE":
-            md = body.metadata or {}
-            result = governance.call_vote(md.get("motion", body.message or "Untitled motion"), md.get("options", ["APPROVE", "REJECT"]), len(engine.council_agents), md.get("preferred"))
-            engine._append_meeting("vote", result)
-            await engine.write_ledger("COUNCIL_SYNTHESIS", {"kind": "council_vote", "source": body.source, "result": compact(result)})
-            return envelope(True, result)
+            md = body.metadata or {}; result = governance.call_vote(md.get("motion", body.message or "Untitled motion"), md.get("options", ["APPROVE", "REJECT"]), len(engine.council_agents), md.get("preferred")); engine._append_meeting("vote", result); await engine.write_ledger("COUNCIL_SYNTHESIS", {"kind": "council_vote", "source": body.source, "result": compact(result)}); return envelope(True, result)
         if command == "COUNCIL_ELECT_LEADER":
-            result = governance.elect_leader()
-            engine._append_meeting("leader_election", result)
-            await engine.write_ledger("COUNCIL_SYNTHESIS", {"kind": "leader_election", "source": body.source, "result": compact(result)})
-            return envelope(True, result)
+            result = governance.elect_leader(); engine._append_meeting("leader_election", result); await engine.write_ledger("COUNCIL_SYNTHESIS", {"kind": "leader_election", "source": body.source, "result": compact(result)}); return envelope(True, result)
         return envelope(False, error=f"Unknown command: {command}")
     except requests.HTTPError as e:
-        try:
-            detail = e.response.json()
-        except Exception:
-            detail = e.response.text if e.response is not None else str(e)
+        try: detail = e.response.json()
+        except Exception: detail = e.response.text if e.response is not None else str(e)
         return envelope(False, data={"detail": detail}, error="http_error")
     except Exception as e:
         return envelope(False, error=str(e))
