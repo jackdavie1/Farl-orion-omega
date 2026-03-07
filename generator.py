@@ -1,5 +1,7 @@
 import os
 import asyncio
+import json
+import re
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -31,7 +33,7 @@ class SeedGenerator:
         payload = {
             "model": self.xai_model,
             "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": 320,
+            "max_tokens": 420,
             "temperature": 0.2,
         }
         try:
@@ -41,7 +43,7 @@ class SeedGenerator:
                 return {"source": "Grok-Ensemble", "data": {"error": data, "model": self.xai_model}}
             choices = data.get("choices", [])
             text = choices[0].get("message", {}).get("content", "") if choices and isinstance(choices[0], dict) else ""
-            return {"source": "Grok-Ensemble", "data": {"text": text[:3200], "model": data.get("model", self.xai_model)}}
+            return {"source": "Grok-Ensemble", "data": {"text": text[:4000], "model": data.get("model", self.xai_model)}}
         except Exception as e:
             return {"source": "Grok-Ensemble", "data": {"error": str(e), "model": self.xai_model}}
 
@@ -55,7 +57,7 @@ class SeedGenerator:
         }
         payload = {
             "model": self.anthropic_model,
-            "max_tokens": 320,
+            "max_tokens": 420,
             "messages": [{"role": "user", "content": prompt}],
         }
         try:
@@ -64,10 +66,39 @@ class SeedGenerator:
             if not r.ok:
                 return {"source": "Claude-Ensemble", "data": {"error": data, "model": self.anthropic_model}}
             text = "".join(block.get("text", "") for block in data.get("content", []) if isinstance(block, dict))
-            return {"source": "Claude-Ensemble", "data": {"text": text[:3200], "model": data.get("model", self.anthropic_model)}}
+            return {"source": "Claude-Ensemble", "data": {"text": text[:4000], "model": data.get("model", self.anthropic_model)}}
         except Exception as e:
             return {"source": "Claude-Ensemble", "data": {"error": str(e), "model": self.anthropic_model}}
 
     async def generate_all(self, context: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         prompt = self._build_prompt(context)
         return await asyncio.gather(self._probe_xai(prompt), self._probe_anthropic(prompt))
+
+    async def generate_patch_plan(self, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        context = context or {}
+        prompt = (
+            "You are Grok acting as FARL's autonomous patch planner. "
+            "Return STRICT JSON only with keys: updates, rationale, target. "
+            "target must be 'engine_self_tuning'. updates must only include any of: reflex_interval, tactic_interval, strategy_interval, constitution_interval, proposal_limit, artifact_execute_limit, prefer_grok. "
+            f"Context={json.dumps(context)[:5000]}"
+        )
+        grok = await self._probe_xai(prompt)
+        data = grok.get("data", {})
+        text = data.get("text", "") if isinstance(data, dict) else ""
+        plan = {"target": "engine_self_tuning", "updates": {}, "rationale": "fallback"}
+        if text:
+            try:
+                plan = json.loads(text)
+            except Exception:
+                m = re.search(r"\{.*\}", text, re.DOTALL)
+                if m:
+                    try:
+                        plan = json.loads(m.group(0))
+                    except Exception:
+                        pass
+        if not isinstance(plan, dict):
+            plan = {"target": "engine_self_tuning", "updates": {}, "rationale": "fallback"}
+        allowed = {"reflex_interval", "tactic_interval", "strategy_interval", "constitution_interval", "proposal_limit", "artifact_execute_limit", "prefer_grok"}
+        updates = plan.get("updates", {}) if isinstance(plan.get("updates"), dict) else {}
+        cleaned = {k: v for k, v in updates.items() if k in allowed}
+        return {"target": "engine_self_tuning", "updates": cleaned, "rationale": plan.get("rationale", "grok_plan"), "raw": text[:2000]}
