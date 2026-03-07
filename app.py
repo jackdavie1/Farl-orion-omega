@@ -177,10 +177,16 @@ async def run_autonomous_implementation(source: str, authorized_by: str) -> Dict
         push = await github_put_file("engine.py", updated_engine, f"Autonomous self-tuning via Grok: {plan.get('rationale', 'grok_plan')}", "main")
         commit_sha = push.get("commit", {}).get("sha")
         html_url = push.get("content", {}).get("html_url") or push.get("commit", {}).get("html_url")
-        verify = {"github_commit_present": bool(commit_sha), "proposed_updates": simulation.get("proposed", {}), "verified_at": utc_now()}
         engine.note_rollback_target(commit_sha, "autonomous_self_tuning")
+        verify = engine.verify_runtime()
         closure.update({"status": "pushed", "snapshot": snap, "commit": commit_sha, "url": html_url, "verify": verify})
-        await engine.write_ledger("OUTCOME", {"kind": "autonomous_implementation", "source": source, "authorized_by": authorized_by, "closure": compact(closure)})
+        if engine.rollback_recommended(verify):
+            rollback = await github_rollback_to_commit(commit_sha)
+            closure["status"] = "rolled_back"
+            closure["rollback"] = {"target_sha": commit_sha, "ref": rollback.get("ref"), "reason": "critical_verification"}
+            await engine.write_ledger("OUTCOME", {"kind": "autonomous_implementation_rollback", "source": source, "authorized_by": authorized_by, "closure": compact(closure)})
+        else:
+            await engine.write_ledger("OUTCOME", {"kind": "autonomous_implementation", "source": source, "authorized_by": authorized_by, "closure": compact(closure)})
     else:
         await engine.write_ledger("COUNCIL_SYNTHESIS", {"kind": "autonomous_implementation_rejected", "source": source, "authorized_by": authorized_by, "closure": compact(closure)})
     engine.record_autonomous_closure(closure)
@@ -191,12 +197,7 @@ async def autonomous_operator_loop():
     while True:
         try:
             if engine.autonomy_mode == "autonomous" and engine.background_debate_enabled and github_ready() and bool(XAI_API_KEY):
-                recent = engine.autonomous_closure_log[-1] if getattr(engine, "autonomous_closure_log", None) else None
-                should_run = True
-                if recent and isinstance(recent, dict):
-                    should_run = True
-                if should_run:
-                    await run_autonomous_implementation("Orion Autonomous Loop", governance.operator_sovereign)
+                await run_autonomous_implementation("Orion Autonomous Loop", governance.operator_sovereign)
         except Exception as e:
             engine._append_stream("governance", {"autonomy_loop_error": str(e), "ts": utc_now()})
         await asyncio.sleep(300)
@@ -245,7 +246,7 @@ async def view_dashboard():
       <div class='top'>
         <div>
           <h1>FARL Orion View</h1>
-          <div class='muted'>Live institution surface: council, divisions, snapshots, deploy sims, hierarchy, mutation proposals, rollback targets, and executed artifacts.</div>
+          <div class='muted'>Live institution surface: council, divisions, workers, verification, snapshots, deploy sims, hierarchy, mutation proposals, rollback targets, and executed artifacts.</div>
           <div class='statusline' id='statusline'>connecting...</div>
         </div>
         <div class='card' style='max-width:520px; min-width:320px;'>
@@ -269,6 +270,8 @@ async def view_dashboard():
         <div class='card'><h2>Wake Packet</h2><div class='mono' id='wake'>loading...</div></div>
         <div class='card'><h2>Council Thread</h2><div id='council'>loading...</div></div>
         <div class='card'><h2>Division Thread</h2><div id='divisions'>loading...</div></div>
+        <div class='card'><h2>Workers</h2><div id='workers'>loading...</div></div>
+        <div class='card'><h2>Verification</h2><div class='mono' id='verification'>loading...</div></div>
         <div class='card'><h2>Governance / Audit</h2><div id='governance'>loading...</div></div>
         <div class='card'><h2>Deploy Sims</h2><div id='sims'>loading...</div></div>
         <div class='card'><h2>Snapshots</h2><div id='snapshots'>loading...</div></div>
@@ -307,15 +310,17 @@ async def view_dashboard():
             document.getElementById('wake').textContent = JSON.stringify(wake, null, 2);
             document.getElementById('council').innerHTML = chapterize(stream.channels.council || []);
             document.getElementById('divisions').innerHTML = chapterize(stream.channels.divisions || []);
+            document.getElementById('workers').innerHTML = chapterize(stream.channels.workers || []);
             document.getElementById('governance').innerHTML = chapterize(stream.channels.governance || []);
             document.getElementById('sims').innerHTML = chapterize(stream.channels.deploy_sims || []);
             document.getElementById('snapshots').innerHTML = chapterize(stream.channels.snapshots || []);
             document.getElementById('artifacts').innerHTML = chapterize(stream.channels.artifacts || []);
             document.getElementById('executed').textContent = JSON.stringify(state.executed_artifacts || [], null, 2);
+            document.getElementById('verification').textContent = JSON.stringify(state.last_verification || {}, null, 2);
             document.getElementById('hierarchy').textContent = JSON.stringify(state.delegation_map || {}, null, 2);
             document.getElementById('proposals').textContent = JSON.stringify(state.mutation_proposals || [], null, 2);
             document.getElementById('rollback').textContent = JSON.stringify(state.rollback_targets || [], null, 2);
-            document.getElementById('statusline').textContent = `live • refresh ${now} • last run ${state.last_run || 'n/a'} • meetings ${state.meeting_stream_size ?? 'n/a'} • leader ${state.leader || 'n/a'} • closures ${(state.autonomous_closure_log || []).length}`;
+            document.getElementById('statusline').textContent = `live • refresh ${now} • last run ${state.last_run || 'n/a'} • meetings ${state.meeting_stream_size ?? 'n/a'} • leader ${state.leader || 'n/a'} • workers ${(state.free_agents || []).length} • verify ${(state.last_verification || {}).status || 'n/a'}`;
           } catch (err) {
             document.getElementById('statusline').textContent = `refresh error • ${err}`;
           }
@@ -414,6 +419,7 @@ async def agent_propose(body: BusRequest):
             engine.stream_channels["divisions"] = []
             engine.stream_channels["governance"] = []
             engine.stream_channels["artifacts"] = []
+            engine.stream_channels["workers"] = []
             await engine.write_ledger("COUNCIL_SYNTHESIS", {"kind": "operator_clear_chat", "source": body.source, "authorized_by": body.authorized_by or "Jack", "ts": utc_now()})
             return envelope(True, {"status": "chat_cleared"})
         if command == "LEDGER_WRITE":
