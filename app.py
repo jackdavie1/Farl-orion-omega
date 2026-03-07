@@ -222,8 +222,7 @@ async def view_dashboard():
 <style>
 :root{--bg:#0a0b10;--bg2:#11131d;--panel:#111521;--panel2:#0d111b;--line:#252a3b;--text:#f5f7ff;--muted:#96a0bd;--accent:#7c8cff;--good:#77e7a7;--warn:#ffd46b;--bad:#ff7f90;--shadow:0 20px 60px rgba(0,0,0,.45)}
 *{box-sizing:border-box}html,body{margin:0;height:100%;background:linear-gradient(180deg,#0b0c12,#07080c);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,sans-serif}
-.app{display:grid;grid-template-columns:280px 1fr 320px;height:100vh;overflow:hidden}
-.sidebar,.rightbar,.center{min-height:0}.sidebar,.rightbar{background:rgba(12,14,22,.95);border-right:1px solid var(--line)}.rightbar{border-right:none;border-left:1px solid var(--line)}
+.app{display:grid;grid-template-columns:280px 1fr 320px;height:100vh;overflow:hidden}.sidebar,.rightbar,.center{min-height:0}.sidebar,.rightbar{background:rgba(12,14,22,.95);border-right:1px solid var(--line)}.rightbar{border-right:none;border-left:1px solid var(--line)}
 .brand{padding:18px 18px 12px;border-bottom:1px solid var(--line)}.brand h1{margin:0;font-size:28px;letter-spacing:-.03em}.brand p{margin:6px 0 0;color:var(--muted);font-size:12px;line-height:1.4}
 .sideSection{padding:14px}.sectionLabel{font-size:11px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);margin-bottom:10px}
 .threadList{display:flex;flex-direction:column;gap:8px}.threadItem{padding:12px 14px;border:1px solid var(--line);border-radius:16px;background:linear-gradient(180deg,#141929,#101522);cursor:pointer}.threadItem.active{border-color:#5666e8;background:linear-gradient(180deg,#20295c,#141b38)}.threadName{font-size:14px;font-weight:700}.threadMeta{font-size:12px;color:var(--muted);margin-top:4px}
@@ -233,7 +232,7 @@ async def view_dashboard():
 .topTitle{font-size:24px;font-weight:800}.topSub{color:var(--muted);font-size:12px;margin-top:4px}.controls{display:flex;gap:8px;flex-wrap:wrap}
 button,select{border:1px solid #313754;background:linear-gradient(180deg,#262e52,#171d34);color:#fff;border-radius:14px;padding:10px 12px;font-size:13px}button{cursor:pointer}button:hover{filter:brightness(1.08)}select{appearance:none}
 .feedWrap{padding:14px 18px;overflow:hidden;display:flex;flex-direction:column}.feed{flex:1;overflow:auto;padding-right:6px}.feed::-webkit-scrollbar{width:10px}.feed::-webkit-scrollbar-thumb{background:#2e365c;border-radius:999px}
-.msg{display:flex;gap:10px;margin-bottom:14px;align-items:flex-start}.avatar{width:38px;height:38px;border-radius:14px;display:flex;align-items:center;justify-content:center;font-weight:800;background:linear-gradient(180deg,#32418f,#1d2755);border:1px solid #4656ab;flex:none}.bubble{min-width:0;max-width:min(860px,100%)}.bubbleTop{display:flex;gap:10px;align-items:center;margin-bottom:6px;flex-wrap:wrap}.who{font-size:13px;font-weight:800}.when{font-size:11px;color:var(--muted)}.tag{font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--accent);border:1px solid #39427b;border-radius:999px;padding:4px 8px}.card{background:linear-gradient(180deg,#111626,#0d1220);border:1px solid #232b49;border-radius:18px;padding:12px 14px;box-shadow:0 12px 28px rgba(0,0,0,.18)}.text{font-size:14px;line-height:1.52;color:#eef2ff;white-space:pre-wrap;word-break:break-word}.kv{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:10px}.mini{padding:10px;border-radius:14px;background:#0a0e1a;border:1px solid #222a46;font-size:12px;color:#dfe6ff}
+.msg{display:flex;gap:10px;margin-bottom:14px;align-items:flex-start}.avatar{width:38px;height:38px;border-radius:14px;display:flex;align-items:center;justify-content:center;font-weight:800;background:linear-gradient(180deg,#32418f,#1d2755);border:1px solid #4656ab;flex:none}.bubble{min-width:0;max-width:min(860px,100%)}.bubbleTop{display:flex;gap:10px;align-items:center;margin-bottom:6px;flex-wrap:wrap}.who{font-size:13px;font-weight:800}.when{font-size:11px;color:var(--muted)}.tag{font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--accent);border:1px solid #39427b;border-radius:999px;padding:4px 8px}.card{background:linear-gradient(180deg,#111626,#0d1220);border:1px solid #232b49;border-radius:18px;padding:12px 14px;box-shadow:0 12px 28px rgba(0,0,0,.18)}.text{font-size:14px;line-height:1.58;color:#eef2ff;white-space:pre-wrap;word-break:break-word}.kv{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:10px}.mini{padding:10px;border-radius:14px;background:#0a0e1a;border:1px solid #222a46;font-size:12px;color:#dfe6ff}
 .composer{border-top:1px solid var(--line);padding:14px 18px;background:rgba(10,11,16,.86);backdrop-filter:blur(10px)}.composerBox{display:grid;grid-template-columns:1fr auto;gap:10px}.composer textarea{width:100%;min-height:72px;max-height:160px;resize:vertical;padding:14px;border-radius:18px;background:#0b0f19;border:1px solid #242b45;color:#fff;font-size:14px}.composerActions{display:flex;flex-direction:column;gap:8px}
 .panelCard{margin:14px;padding:14px;border:1px solid var(--line);border-radius:18px;background:linear-gradient(180deg,#121725,#0d111a)}.panelCard h3{margin:0 0 10px;font-size:16px}.mono{white-space:pre-wrap;word-break:break-word;font-size:12px;line-height:1.42;color:#dde4ff;max-height:220px;overflow:auto}.pillRow{display:flex;flex-wrap:wrap;gap:8px}.pill{font-size:11px;padding:7px 10px;border-radius:999px;border:1px solid #303a63;background:#121938;color:#dfe7ff}.good{color:var(--good)}.warn{color:var(--warn)}.bad{color:var(--bad)}
 @media (max-width:1100px){.app{grid-template-columns:84px 1fr}.rightbar{display:none}.brand h1,.brand p,.threadMeta,.sectionLabel{display:none}.threadName{font-size:0}.threadName::before{content:'•';font-size:22px}.threadItem{padding:14px;display:flex;justify-content:center}.sideSection{padding:10px}.statGrid{grid-template-columns:1fr}}
@@ -243,152 +242,56 @@ button,select{border:1px solid #313754;background:linear-gradient(180deg,#262e52
 <body>
 <div class='app'>
   <aside class='sidebar'>
-    <div class='brand'>
-      <h1>FARL Live</h1>
-      <p>Chat-first council room.</p>
-    </div>
-    <div class='sideSection'>
-      <div class='sectionLabel'>Threads</div>
-      <div class='threadList' id='threadList'></div>
-    </div>
-    <div class='sideSection'>
-      <div class='sectionLabel'>At a glance</div>
-      <div class='statGrid'>
-        <div class='stat'><div class='k'>Leader</div><div class='v' id='leaderStat'>-</div></div>
-        <div class='stat'><div class='k'>Verify</div><div class='v' id='verifyStat'>-</div></div>
-        <div class='stat'><div class='k'>Workers</div><div class='v' id='workerStat'>-</div></div>
-        <div class='stat'><div class='k'>Spend</div><div class='v' id='spendStat'>-</div></div>
-      </div>
-    </div>
+    <div class='brand'><h1>FARL Live</h1><p>Chat-first council room.</p></div>
+    <div class='sideSection'><div class='sectionLabel'>Threads</div><div class='threadList' id='threadList'></div></div>
+    <div class='sideSection'><div class='sectionLabel'>At a glance</div><div class='statGrid'><div class='stat'><div class='k'>Leader</div><div class='v' id='leaderStat'>-</div></div><div class='stat'><div class='k'>Verify</div><div class='v' id='verifyStat'>-</div></div><div class='stat'><div class='k'>Workers</div><div class='v' id='workerStat'>-</div></div><div class='stat'><div class='k'>Spend</div><div class='v' id='spendStat'>-</div></div></div></div>
   </aside>
   <main class='center'>
-    <div class='topbar'>
-      <div>
-        <div class='topTitle' id='feedTitle'>Council</div>
-        <div class='topSub' id='feedSub'>Live internal autonomy stream</div>
-      </div>
-      <div class='controls'>
-        <select id='entryCount' onchange='renderFeed()'>
-          <option value='12'>12</option>
-          <option value='20' selected>20</option>
-          <option value='40'>40</option>
-        </select>
-        <button onclick="control('RUN_COUNCIL_CYCLE')">Council</button>
-        <button onclick="control('RUN_RESEARCH_CYCLE')">Research</button>
-        <button onclick="control('RUN_AUTONOMOUS_IMPLEMENTATION')">Closure</button>
-        <button onclick='scrollToBottomFeed()'>Latest</button>
-      </div>
-    </div>
-    <div class='feedWrap'>
-      <div class='feed' id='feed'></div>
-    </div>
-    <div class='composer'>
-      <div class='composerBox'>
-        <textarea id='operatorNote' placeholder='Type into the council feed…'></textarea>
-        <div class='composerActions'>
-          <button onclick='sendNote()'>Send</button>
-          <button onclick='toggleAutonomy(true)'>Auto ON</button>
-          <button onclick='toggleAutonomy(false)'>Auto OFF</button>
-          <button onclick='snapshotNow()'>Snapshot</button>
-          <button onclick='clearChat()'>Clear</button>
-        </div>
-      </div>
-    </div>
+    <div class='topbar'><div><div class='topTitle' id='feedTitle'>Council</div><div class='topSub' id='feedSub'>Live internal autonomy stream</div></div><div class='controls'><select id='entryCount' onchange='renderFeed()'><option value='12'>12</option><option value='20' selected>20</option><option value='40'>40</option></select><button onclick="control('RUN_COUNCIL_CYCLE')">Council</button><button onclick="control('RUN_RESEARCH_CYCLE')">Research</button><button onclick="control('RUN_AUTONOMOUS_IMPLEMENTATION')">Closure</button><button onclick='scrollToBottomFeed()'>Latest</button></div></div>
+    <div class='feedWrap'><div class='feed' id='feed'></div></div>
+    <div class='composer'><div class='composerBox'><textarea id='operatorNote' placeholder='Type into the council feed…'></textarea><div class='composerActions'><button onclick='sendNote()'>Send</button><button onclick='toggleAutonomy(true)'>Auto ON</button><button onclick='toggleAutonomy(false)'>Auto OFF</button><button onclick='snapshotNow()'>Snapshot</button><button onclick='clearChat()'>Clear</button></div></div></div>
   </main>
   <aside class='rightbar'>
-    <div class='panelCard'>
-      <h3>Autonomy proof</h3>
-      <div class='pillRow' id='proofPills'></div>
-    </div>
-    <div class='panelCard'>
-      <h3>Token Master</h3>
-      <div class='mono' id='tokenPane'>loading…</div>
-    </div>
-    <div class='panelCard'>
-      <h3>Spend</h3>
-      <div class='mono' id='spendPane'>loading…</div>
-    </div>
-    <div class='panelCard'>
-      <h3>Verification</h3>
-      <div class='mono' id='verifyPane'>loading…</div>
-    </div>
-    <div class='panelCard'>
-      <h3>Mutation queue</h3>
-      <div class='mono' id='mutationPane'>loading…</div>
-    </div>
+    <div class='panelCard'><h3>Autonomy proof</h3><div class='pillRow' id='proofPills'></div></div>
+    <div class='panelCard'><h3>Token Master</h3><div class='mono' id='tokenPane'>loading…</div></div>
+    <div class='panelCard'><h3>Spend</h3><div class='mono' id='spendPane'>loading…</div></div>
+    <div class='panelCard'><h3>Verification</h3><div class='mono' id='verifyPane'>loading…</div></div>
+    <div class='panelCard'><h3>Mutation queue</h3><div class='mono' id='mutationPane'>loading…</div></div>
   </aside>
 </div>
 <script>
 let state=null, stream=null, wake=null, currentThread='council';
-const threadDefs=[
-  ['council','Council','Meetings, votes, debate'],
-  ['workers','Workers','Process-local agent actions'],
-  ['divisions','Divisions','Division findings and questions'],
-  ['governance','Governance','Verification, rollback, audit'],
-  ['deploy_sims','Deploy Sims','Simulation gating and deploy notes'],
-  ['snapshots','Snapshots','Replay and state snapshots'],
-  ['artifacts','Artifacts','Executed artifact outputs'],
-  ['token_master','Token Master','Spend reports and alerts']
-];
+const threadDefs=[['council','Council','Meetings, votes, debate'],['workers','Workers','Process-local agent actions'],['divisions','Divisions','Division findings and questions'],['governance','Governance','Verification, rollback, audit'],['deploy_sims','Deploy Sims','Simulation gating and deploy notes'],['snapshots','Snapshots','Replay and state snapshots'],['artifacts','Artifacts','Executed artifact outputs'],['token_master','Token Master','Spend reports and alerts']];
 function esc(s){return String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;')}
 function money(v){return '$'+Number(v||0).toFixed(4)}
 async function getJson(url){const r=await fetch(url,{cache:'no-store'});if(!r.ok) throw new Error(`HTTP ${r.status}`); return await r.json()}
 async function post(body){await fetch('/view/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})}
-function short(obj,max=700){return esc(JSON.stringify(obj,null,2).slice(0,max))}
 function initials(label){return esc((label||'X').slice(0,2).toUpperCase())}
-function renderThreadRail(){
-  const el=document.getElementById('threadList');
-  el.innerHTML=threadDefs.map(([id,name,meta])=>{
-    const count=((stream?.channels||{})[id]||[]).length;
-    return `<div class='threadItem ${currentThread===id?'active':''}' onclick="setThread('${id}')"><div class='threadName'>${esc(name)}</div><div class='threadMeta'>${esc(meta)} · ${count}</div></div>`
-  }).join('')
-}
+function renderThreadRail(){const el=document.getElementById('threadList'); el.innerHTML=threadDefs.map(([id,name,meta])=>{const count=((stream?.channels||{})[id]||[]).length; return `<div class='threadItem ${currentThread===id?'active':''}' onclick="setThread('${id}')"><div class='threadName'>${esc(name)}</div><div class='threadMeta'>${esc(meta)} · ${count}</div></div>`}).join('')}
+function sentence(text){return esc(String(text||'').replace(/[{}\[\]"]+/g,'').replace(/\s+/g,' ').trim())}
 function summarize(c){
-  if(!c) return {body:'',meta:[]};
-  if(c.message) return {body:esc(c.message),meta:[]};
-  if(c.alert?.message) return {body:`<span class='warn'>${esc(c.alert.message)}</span>`,meta:[]};
-  if(c.report) return {body:`Token report updated.`,meta:[['Estimate',money(c.report.estimate_usd)],['Total',money(c.report.total_usd)]]};
-  if(c.verification) return {body:`Runtime verification ${esc(c.verification.status)}.`,meta:[['Score',c.verification.score],['Wake',String(c.verification.checks?.wake_packet_ready)]]};
-  if(c.rollback_target) return {body:`Rollback target registered.`,meta:[['Commit',c.rollback_target.commit_sha],['Reason',c.rollback_target.reason]]};
-  if(c.division && c.latest?.finding) return {body:esc(c.latest.finding),meta:[['Division',c.division]]};
-  if(c.division && c.question) return {body:esc(c.question),meta:[['Division',c.division],['Kind','question']]};
-  if(c.name && c.mission) return {body:esc(c.mission),meta:[['Worker',c.name],['Infra',c.infrastructure||'local']]};
-  if(c.trigger==='reflex') return {body:'Reflex cycle completed.',meta:[['Providers',(c.triangulation?.providers||[]).join(', ')],['Spend',money(c.spend?.last_estimate_usd)]]};
-  if(c.trigger==='tactic') return {body:'Council tactic cycle completed.',meta:[['Confidence',c.vote?.confidence],['Approvals',c.vote?.approvals]]};
-  if(c.kind==='strategy_cycle' || c.winner) return {body:'Research/strategy cycle updated.',meta:[['Winner',c.winner?.model||'n/a'],['Margin',c.metrics?.margin||'n/a']]};
-  return {body:`<div class='text'>${short(c,1100)}</div>`,meta:[]};
+  if(!c) return {title:'Quiet moment', body:'The room pauses briefly while the next event is prepared.', meta:[]};
+  if(c.message) return {title:'Operator note received', body:sentence(c.message), meta:[]};
+  if(c.alert?.message) return {title:'Spend alert', body:sentence(c.alert.message), meta:[]};
+  if(c.report) return {title:'TokenMaster report', body:`The TokenMaster updated the spend model. Estimated cycle cost is ${money(c.report.estimate_usd)} and the running total is ${money(c.report.total_usd)}.`, meta:[['Estimate',money(c.report.estimate_usd)],['Total',money(c.report.total_usd)]]};
+  if(c.verification) return {title:'Verification pass', body:`The runtime completed a verification pass and currently reads as ${sentence(c.verification.status)}.`, meta:[['Score',c.verification.score],['Wake packet',String(c.verification.checks?.wake_packet_ready)]]};
+  if(c.rollback_target) return {title:'Rollback anchor stored', body:`A rollback target was registered so the organism can retreat if a later mutation degrades the system.`, meta:[['Commit',c.rollback_target.commit_sha],['Reason',c.rollback_target.reason]]};
+  if(c.division && c.latest?.finding) return {title:`${sentence(c.division)} update`, body:sentence(c.latest.finding), meta:[]};
+  if(c.division && c.question) return {title:`${sentence(c.division)} asks`, body:sentence(c.question), meta:[]};
+  if(c.name && c.mission) return {title:`${sentence(c.name)} active`, body:sentence(c.mission), meta:[['Infrastructure',c.infrastructure||'process-local']]};
+  if(c.trigger==='reflex') return {title:'Reflex cycle complete', body:`The fast loop refreshed the room. Provider triangulation was attempted, artifacts were reconsidered, and the TokenMaster updated the spend estimate.`, meta:[['Providers',(c.triangulation?.providers||[]).join(', ')||'none'],['Last spend',money(c.spend?.last_estimate_usd)]]};
+  if(c.trigger==='tactic') return {title:'Council tactic cycle', body:`The chamber compared priorities, weighed risk, and refreshed the delegation structure before the next move.`, meta:[['Confidence',c.vote?.confidence],['Approvals',c.vote?.approvals]]};
+  if(c.kind==='strategy_cycle' || c.winner) return {title:'Strategy cycle concluded', body:`A research cycle completed and the comparative tournament produced a current winner for the next round of emphasis.`, meta:[['Winner',c.winner?.model||'n/a'],['Margin',c.metrics?.margin||'n/a']]};
+  if(c.snapshot) return {title:'Snapshot captured', body:'A state snapshot was recorded so the current organism can be replayed or compared later.', meta:[]};
+  return {title:'Council entry', body:'A structured event was recorded in the room. Open the side proof panels for the full machine state.', meta:[]};
 }
 function renderFeed(){
   if(!stream) return;
-  const items=((stream.channels||{})[currentThread]||[]);
-  const count=Number(document.getElementById('entryCount').value||20);
-  const chosen=items.slice(-count).reverse();
-  document.getElementById('feed').innerHTML = chosen.length ? chosen.map(row=>{
-    const c=row.content||row; const label=c.kind||c.division||c.name||currentThread; const ts=row.ts||c.ts||''; const s=summarize(c);
-    return `<div class='msg'><div class='avatar'>${initials(label)}</div><div class='bubble'><div class='bubbleTop'><div class='who'>${esc(label)}</div><div class='when'>${esc(ts)}</div><div class='tag'>${esc(currentThread)}</div></div><div class='card'><div class='text'>${s.body}</div>${s.meta.length?`<div class='kv'>${s.meta.map(([k,v])=>`<div class='mini'><strong>${esc(k)}</strong><br>${esc(String(v))}</div>`).join('')}</div>`:''}</div></div></div>`
-  }).join('') : `<div class='msg'><div class='avatar'>--</div><div class='bubble'><div class='card'><div class='text'>No entries yet.</div></div></div></div>`;
+  const items=((stream.channels||{})[currentThread]||[]); const count=Number(document.getElementById('entryCount').value||20); const chosen=items.slice(-count).reverse();
+  document.getElementById('feed').innerHTML = chosen.length ? chosen.map(row=>{const c=row.content||row; const label=c.kind||c.division||c.name||currentThread; const ts=row.ts||c.ts||''; const s=summarize(c); return `<div class='msg'><div class='avatar'>${initials(label)}</div><div class='bubble'><div class='bubbleTop'><div class='who'>${esc(s.title)}</div><div class='when'>${esc(ts)}</div><div class='tag'>${esc(currentThread)}</div></div><div class='card'><div class='text'>${esc(s.body)}</div>${s.meta.length?`<div class='kv'>${s.meta.map(([k,v])=>`<div class='mini'><strong>${esc(k)}</strong><br>${esc(String(v))}</div>`).join('')}</div>`:''}</div></div></div>`}).join('') : `<div class='msg'><div class='avatar'>--</div><div class='bubble'><div class='card'><div class='text'>No entries yet.</div></div></div></div>`;
   const def=threadDefs.find(t=>t[0]===currentThread); document.getElementById('feedTitle').textContent=def?.[1]||currentThread; document.getElementById('feedSub').textContent=def?.[2]||'';
 }
-function renderSide(){
-  if(!state) return;
-  document.getElementById('leaderStat').textContent=state.leader||'-';
-  document.getElementById('verifyStat').textContent=(state.last_verification||{}).status||'-';
-  document.getElementById('workerStat').textContent=String((state.free_agents||[]).length);
-  document.getElementById('spendStat').textContent=money((state.spend_state||{}).total_usd||0);
-  const ver=state.last_verification||{}; const spend=state.spend_state||{};
-  document.getElementById('proofPills').innerHTML=[
-    `autonomy ${state.autonomy_mode||'n/a'}`,
-    `verify ${ver.status||'n/a'}`,
-    `workers ${(state.free_agents||[]).length}`,
-    `grok ${String((state.world_model||{}).resources?.grok_live ?? false)}`,
-    `meetings ${state.meeting_stream_size||0}`,
-    `spend ${money(spend.total_usd||0)}`
-  ].map(x=>`<span class='pill'>${esc(x)}</span>`).join('');
-  document.getElementById('tokenPane').textContent=JSON.stringify(state.token_master||{},null,2);
-  document.getElementById('spendPane').textContent=JSON.stringify(spend,null,2);
-  document.getElementById('verifyPane').textContent=JSON.stringify(ver,null,2);
-  document.getElementById('mutationPane').textContent=JSON.stringify({proposals:state.mutation_proposals||[],rollback:state.rollback_targets||[],closures:state.autonomous_closure_log||[]},null,2);
-}
+function renderSide(){if(!state) return; document.getElementById('leaderStat').textContent=state.leader||'-'; document.getElementById('verifyStat').textContent=(state.last_verification||{}).status||'-'; document.getElementById('workerStat').textContent=String((state.free_agents||[]).length); document.getElementById('spendStat').textContent=money((state.spend_state||{}).total_usd||0); const ver=state.last_verification||{}; const spend=state.spend_state||{}; document.getElementById('proofPills').innerHTML=[`autonomy ${state.autonomy_mode||'n/a'}`,`verify ${ver.status||'n/a'}`,`workers ${(state.free_agents||[]).length}`,`grok ${String((state.world_model||{}).resources?.grok_live ?? false)}`,`meetings ${state.meeting_stream_size||0}`,`spend ${money(spend.total_usd||0)}`].map(x=>`<span class='pill'>${esc(x)}</span>`).join(''); document.getElementById('tokenPane').textContent=`TokenMaster is active. Running total spend is ${money(spend.total_usd||0)}. Last estimated cycle spend is ${money(spend.last_estimate_usd||0)}.`; document.getElementById('spendPane').textContent=`Total estimated spend: ${money(spend.total_usd||0)}\nLast cycle estimate: ${money(spend.last_estimate_usd||0)}\nTracked events: ${(spend.events||[]).length}`; document.getElementById('verifyPane').textContent=`Status: ${ver.status||'n/a'}\nScore: ${ver.score||'n/a'}\nChecks passing: ${ver.checks ? Object.values(ver.checks).filter(Boolean).length : 0}`; document.getElementById('mutationPane').textContent=`Queued proposals: ${(state.mutation_proposals||[]).length}\nRollback targets: ${(state.rollback_targets||[]).length}\nAutonomous closures: ${(state.autonomous_closure_log||[]).length}`}
 function setThread(id){currentThread=id; renderThreadRail(); renderFeed(); scrollToBottomFeed()}
 function scrollToBottomFeed(){const f=document.getElementById('feed'); f.scrollTop=f.scrollHeight}
 async function control(command){await post({command,authorized_by:'Jack'}); await refresh()}
@@ -396,10 +299,7 @@ async function sendNote(){const text=document.getElementById('operatorNote').val
 async function clearChat(){await post({command:'OPERATOR_CLEAR_CHAT',authorized_by:'Jack',source:'Jack /view'}); await refresh()}
 async function toggleAutonomy(enabled){await post({command:'SET_CONSTRAINTS',authorized_by:'Jack',enabled,mode:enabled?'autonomous':'manual'}); await refresh()}
 async function snapshotNow(){await post({command:'LEDGER_WRITE',entry_type:'COUNCIL_SYNTHESIS',message:'Manual snapshot request from /view',source:'FARL Orion View',kind:'manual_snapshot'}); await refresh()}
-async function refresh(){
-  try{[state,stream,wake]=await Promise.all([getJson('/view/state?ts='+Date.now()),getJson('/view/stream?ts='+Date.now()),getJson('/view/wake?ts='+Date.now())]); renderThreadRail(); renderFeed(); renderSide();}
-  catch(err){document.getElementById('feed').innerHTML=`<div class='msg'><div class='avatar'>!!</div><div class='bubble'><div class='card'><div class='text'>refresh error ${esc(err)}</div></div></div></div>`}
-}
+async function refresh(){try{[state,stream,wake]=await Promise.all([getJson('/view/state?ts='+Date.now()),getJson('/view/stream?ts='+Date.now()),getJson('/view/wake?ts='+Date.now())]); renderThreadRail(); renderFeed(); renderSide();}catch(err){document.getElementById('feed').innerHTML=`<div class='msg'><div class='avatar'>!!</div><div class='bubble'><div class='card'><div class='text'>The control room hit a refresh error.</div></div></div></div>`}}
 refresh(); setInterval(refresh,3000);
 </script>
 </body>
