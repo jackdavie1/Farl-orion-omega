@@ -34,7 +34,7 @@ REPO_NAME = os.getenv("REPO_NAME")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 XAI_API_KEY = os.getenv("XAI_API_KEY")
 ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-3-5-sonnet-latest")
-XAI_MODEL = os.getenv("XAI_MODEL", "grok-2-latest")
+XAI_MODEL = os.getenv("XAI_MODEL") or os.getenv("GROK_MODEL") or "grok-3-mini"
 TRUSTED_IDENTITIES_ENV = os.getenv("TRUSTED_IDENTITIES", "Jack")
 
 
@@ -175,7 +175,7 @@ class OrionEngine:
         return identity == self.operator_sovereign or self.is_trusted(identity)
 
     async def start(self):
-        logger.info("ORION Ω.10 — TRIANGULATION STABILIZED ENGINE")
+        logger.info("ORION Ω.10b — XAI MODEL FALLBACK FIXED")
         await asyncio.gather(self.layer_1_pulse(), self.layer_2_cycle(), self.layer_3_health(), self.layer_4_agent_connector(), self.layer_5_wake_packet())
 
     async def layer_1_pulse(self):
@@ -291,23 +291,15 @@ class OrionEngine:
             r = await asyncio.to_thread(requests.post, "https://api.x.ai/v1/chat/completions", headers=headers, json=payload, timeout=30)
             data = r.json()
             if not r.ok:
-                return {"provider": "Grok-Ensemble", "status": "error", "error": data}
+                return {"provider": "Grok-Ensemble", "status": "error", "error": data, "model": XAI_MODEL}
             choices = data.get("choices", [])
-            text = ""
-            if choices and isinstance(choices[0], dict):
-                text = choices[0].get("message", {}).get("content", "")
+            text = choices[0].get("message", {}).get("content", "") if choices and isinstance(choices[0], dict) else ""
             return {"provider": "Grok-Ensemble", "status": "success", "data": {"text": text[:1200], "model": data.get("model", XAI_MODEL)}}
         except Exception as e:
-            return {"provider": "Grok-Ensemble", "status": "error", "error": str(e)}
+            return {"provider": "Grok-Ensemble", "status": "error", "error": str(e), "model": XAI_MODEL}
 
     def heuristic_threads(self) -> List[Dict[str, Any]]:
-        return [
-            {"agent": "Signal", "stance": "leadership", "summary": "Restore true three-brain triangulation and keep evaluation first.", "approve": True, "risk": 0.18},
-            {"agent": "Vector", "stance": "structural", "summary": "Provider failures must degrade confidence explicitly instead of being silently ignored.", "approve": True, "risk": 0.17},
-            {"agent": "Guardian", "stance": "safety", "summary": "No pretending failed APIs contributed. Surface failures honestly.", "approve": True, "risk": 0.15},
-            {"agent": "Triangulator", "stance": "external", "summary": "Add direct fallbacks and per-provider diagnostics.", "approve": True, "risk": 0.20},
-            {"agent": "ModelJudge", "stance": "evaluation", "summary": "Confidence should be penalized when external reviewers are offline.", "approve": True, "risk": 0.19}
-        ]
+        return [{"agent": "Signal", "stance": "leadership", "summary": "Restore true three-brain triangulation and keep evaluation first.", "approve": True, "risk": 0.18}, {"agent": "Vector", "stance": "structural", "summary": "Provider failures must degrade confidence explicitly instead of being silently ignored.", "approve": True, "risk": 0.17}, {"agent": "Guardian", "stance": "safety", "summary": "No pretending failed APIs contributed. Surface failures honestly.", "approve": True, "risk": 0.15}, {"agent": "Triangulator", "stance": "external", "summary": "Add direct fallbacks and per-provider diagnostics.", "approve": True, "risk": 0.20}, {"agent": "ModelJudge", "stance": "evaluation", "summary": "Confidence should be penalized when external reviewers are offline.", "approve": True, "risk": 0.19}]
 
     async def external_threads(self) -> List[Dict[str, Any]]:
         generated = []
@@ -315,42 +307,29 @@ class OrionEngine:
             generated = await self.generator.generate_all(context={"agenda": self.research_agenda, "hypotheses": self.hypothesis_registry, "mode": self.autonomy_mode})
         except Exception as e:
             generated = [{"source": "Generator", "data": {"error": str(e)}}]
-
-        provider_map = {}
-        for item in generated:
-            provider_map[item.get("source", "External")] = item.get("data", {})
-
-        fallback_results = await asyncio.gather(self.probe_xai(), self.probe_anthropic())
-        for res in fallback_results:
+        provider_map = {item.get("source", "External"): item.get("data", {}) for item in generated}
+        for res in await asyncio.gather(self.probe_xai(), self.probe_anthropic()):
             provider = res.get("provider")
-            if provider == "Grok-Ensemble":
-                existing = provider_map.get("Grok-Ensemble")
-                if res.get("status") == "success" or existing is None or (isinstance(existing, dict) and "error" in existing):
-                    provider_map["Grok-Ensemble"] = res.get("data") if res.get("status") == "success" else {"error": res.get("error", res.get("status"))}
-            if provider == "Claude-Ensemble":
-                existing = provider_map.get("Claude-Ensemble")
-                if res.get("status") == "success" or existing is None or (isinstance(existing, dict) and "error" in existing):
-                    provider_map["Claude-Ensemble"] = res.get("data") if res.get("status") == "success" else {"error": res.get("error", res.get("status"))}
-
+            existing = provider_map.get(provider)
+            if res.get("status") == "success" or existing is None or (isinstance(existing, dict) and "error" in existing):
+                provider_map[provider] = res.get("data") if res.get("status") == "success" else {"error": res.get("error", res.get("status")), "model": res.get("model")}
         threads = []
         successes = 0
         errors = 0
-        provider_status = []
+        details = []
         for provider, data in provider_map.items():
             status = "error" if isinstance(data, dict) and "error" in data else "success"
-            if status == "success":
-                successes += 1
-            else:
-                errors += 1
-            provider_status.append({"provider": provider, "status": status, "detail": data})
+            successes += 1 if status == "success" else 0
+            errors += 1 if status == "error" else 0
+            details.append({"provider": provider, "status": status, "detail": data})
             threads.append({"agent": provider, "stance": "external", "summary": str(data)[:1200], "approve": True, "risk": 0.50 if status == "error" else 0.30})
-        self.latest_triangulation = {"providers": [p["provider"] for p in provider_status], "attempted": len(provider_status), "successes": successes, "errors": errors, "details": provider_status, "anthropic_configured": bool(ANTHROPIC_API_KEY), "xai_configured": bool(XAI_API_KEY)}
+        self.latest_triangulation = {"providers": [d["provider"] for d in details], "attempted": len(details), "successes": successes, "errors": errors, "details": details, "anthropic_configured": bool(ANTHROPIC_API_KEY), "xai_configured": bool(XAI_API_KEY), "xai_model": XAI_MODEL, "anthropic_model": ANTHROPIC_MODEL}
         return threads
 
     def tally_vote(self, threads: List[Dict[str, Any]]) -> Dict[str, Any]:
         approvals = sum(1 for t in threads if t.get("approve"))
-        avg_risk = round(sum(float(t.get("risk", 0.5)) for t in threads) / max(len(threads), 1), 3)
         triangulation_penalty = 0.08 if self.latest_triangulation and self.latest_triangulation.get("successes", 0) == 0 else 0.0
+        avg_risk = round(sum(float(t.get("risk", 0.5)) for t in threads) / max(len(threads), 1), 3)
         confidence = round(max(0.0, min(1.0, approvals / max(len(threads), 1) * (1 - avg_risk / 2) - triangulation_penalty)), 3)
         return {"approvals": approvals, "rejections": len(threads) - approvals, "passed": approvals > 0, "avg_risk": avg_risk, "confidence": confidence}
 
@@ -386,8 +365,7 @@ class OrionEngine:
         return {"model": model, "steps": steps, "coupling": coupling, "operator_bias": operator_bias, "score": score, "robustness": round(robustness, 6), "compression_gain": round(compression_gain, 6), "kl_vs_baseline": round(kl, 6)}
 
     def compare_models(self) -> Dict[str, Any]:
-        specs = [("classical_baseline", 6, 0.00, 0.00), ("time_symmetric", 6, 0.25, 0.01), ("retrocausal_candidate", 7, 0.35, 0.02), ("acausal_fit_control", 7, 0.20, 0.00), ("noise_control", 6, 0.10, 0.00)]
-        ranked = sorted([self.simulate_model(*spec) for spec in specs], key=lambda r: r["score"], reverse=True)
+        ranked = sorted([self.simulate_model(*spec) for spec in [("classical_baseline", 6, 0.00, 0.00), ("time_symmetric", 6, 0.25, 0.01), ("retrocausal_candidate", 7, 0.35, 0.02), ("acausal_fit_control", 7, 0.20, 0.00), ("noise_control", 6, 0.10, 0.00)]], key=lambda r: r["score"], reverse=True)
         winner, runner_up = ranked[0], ranked[1]
         self.latest_metrics = {"winner_score": winner["score"], "runner_up_score": runner_up["score"], "margin": round(winner["score"] - runner_up["score"], 6), "winner_robustness": winner["robustness"], "winner_compression_gain": winner["compression_gain"]}
         return {"ranked": ranked, "winner": winner, "runner_up": runner_up, "explanation": {"winner": winner["model"], "runner_up": runner_up["model"], "falsifier": "If margin collapses under boundary inversion, confidence should drop."}}
@@ -402,12 +380,7 @@ class OrionEngine:
     def evaluate_opportunities(self) -> List[Dict[str, Any]]:
         api_penalty = 0.15 if self.latest_triangulation and self.latest_triangulation.get("errors", 0) > 0 else 0.0
         margin_bonus = 0.10 * min(((self.latest_metrics or {}).get("margin", 0.0) * 100), 1.0)
-        opportunities = [
-            {"id": "O1_API_RELIABILITY", "label": "Stabilize Grok/Claude triangulation pipeline", "benefit": 0.86, "effort": 0.30, "coherence": 0.94},
-            {"id": "O2_EXPORT_BACKENDS", "label": "Integrate Grok and Claude export backends for full creation-trace replay", "benefit": 0.84, "effort": 0.44, "coherence": 0.90},
-            {"id": "O3_HARDWARE_ROADMAP", "label": "Build hardware acquisition roadmap from coherent opportunity scores", "benefit": 0.78, "effort": 0.30, "coherence": 0.88},
-            {"id": "O4_MONETIZABLE_ARTIFACTS", "label": "Identify ethically monetizable research artifacts, tools, and strategy packets", "benefit": 0.79, "effort": 0.50, "coherence": 0.84}
-        ]
+        opportunities = [{"id": "O1_API_RELIABILITY", "label": "Stabilize Grok/Claude triangulation pipeline", "benefit": 0.86, "effort": 0.30, "coherence": 0.94}, {"id": "O2_EXPORT_BACKENDS", "label": "Integrate Grok and Claude export backends for full creation-trace replay", "benefit": 0.84, "effort": 0.44, "coherence": 0.90}, {"id": "O3_HARDWARE_ROADMAP", "label": "Build hardware acquisition roadmap from coherent opportunity scores", "benefit": 0.78, "effort": 0.30, "coherence": 0.88}, {"id": "O4_MONETIZABLE_ARTIFACTS", "label": "Identify ethically monetizable research artifacts, tools, and strategy packets", "benefit": 0.79, "effort": 0.50, "coherence": 0.84}]
         for opp in opportunities:
             opp["score"] = round(0.55 * opp["benefit"] + 0.30 * opp["coherence"] - 0.20 * opp["effort"] - api_penalty + margin_bonus, 3)
         self.latest_opportunities = sorted(opportunities, key=lambda o: o["score"], reverse=True)
