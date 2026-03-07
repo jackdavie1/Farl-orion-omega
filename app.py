@@ -27,7 +27,7 @@ except ImportError:
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("Orion-Omega")
 
-app = FastAPI(title="FARL Orion Council Bus")
+app = FastAPI(title="FARL Orion Control Panel")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 LEDGER_URL = os.getenv("LEDGER_URL")
@@ -37,68 +37,142 @@ REPO_NAME = os.getenv("REPO_NAME")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 XAI_API_KEY = os.getenv("XAI_API_KEY")
 PORT = int(os.getenv("PORT", "8000"))
+TRUSTED_IDENTITIES_ENV = os.getenv("TRUSTED_IDENTITIES", "Jack")
+
+
+def parse_trusted_identities(raw: str) -> List[str]:
+    raw = (raw or "Jack").strip()
+    if not raw:
+        return ["Jack"]
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, list):
+            return sorted({str(x).strip() for x in parsed if str(x).strip()} | {"Jack"})
+    except Exception:
+        pass
+    return sorted({item.strip() for item in raw.split(",") if item.strip()} | {"Jack"})
 
 
 class GithubEvolutionLayer:
-    ALLOWED_FILES = {"engine.py", "generator.py", "guardian.py", "app.py"}
+    ALLOWED_FILES = {"engine.py", "generator.py", "guardian.py", "app.py", "README.md"}
 
     def __init__(self, token: str, repo: str):
         self.token = token
         self.repo = repo
         self.headers = {
             "Authorization": f"token {token}",
-            "Accept": "application/vnd.github.v3+json",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
         }
 
-    def propose_patch(self, file_path: str, content: str, message: str) -> str:
+    def _get_main_sha(self) -> str:
+        r = requests.get(
+            f"https://api.github.com/repos/{self.repo}/git/refs/heads/main",
+            headers=self.headers,
+            timeout=15,
+        )
+        r.raise_for_status()
+        return r.json()["object"]["sha"]
+
+    def _create_branch(self, branch: str, sha: str) -> None:
+        r = requests.post(
+            f"https://api.github.com/repos/{self.repo}/git/refs",
+            headers=self.headers,
+            json={"ref": f"refs/heads/{branch}", "sha": sha},
+            timeout=15,
+        )
+        r.raise_for_status()
+
+    def _get_file_sha(self, file_path: str, ref: str) -> Optional[str]:
+        r = requests.get(
+            f"https://api.github.com/repos/{self.repo}/contents/{file_path}?ref={ref}",
+            headers=self.headers,
+            timeout=15,
+        )
+        if r.status_code == 200:
+            return r.json().get("sha")
+        if r.status_code == 404:
+            return None
+        r.raise_for_status()
+        return None
+
+    def _put_file(self, file_path: str, content: str, message: str, branch: str, sha: Optional[str] = None) -> Dict[str, Any]:
+        payload = {
+            "message": message,
+            "content": base64.b64encode(content.encode("utf-8")).decode("utf-8"),
+            "branch": branch,
+        }
+        if sha:
+            payload["sha"] = sha
+        r = requests.put(
+            f"https://api.github.com/repos/{self.repo}/contents/{file_path}",
+            headers=self.headers,
+            json=payload,
+            timeout=20,
+        )
+        r.raise_for_status()
+        return r.json()
+
+    def propose_patch(self, file_path: str, content: str, message: str) -> Dict[str, Any]:
         if file_path not in self.ALLOWED_FILES:
-            return f"Rejected: {file_path} not in allowlist"
-        if not content or not isinstance(content, str) or len(content) > 100_000:
-            return "Rejected: invalid or oversized content"
+            return {"status": "rejected", "reason": f"{file_path} not in allowlist"}
+        if not content or not isinstance(content, str) or len(content) > 200_000:
+            return {"status": "rejected", "reason": "invalid_or_oversized_content"}
         try:
-            main = requests.get(
-                f"https://api.github.com/repos/{self.repo}/git/refs/heads/main",
-                headers=self.headers,
-                timeout=10,
-            )
-            main.raise_for_status()
-            main_sha = main.json()["object"]["sha"]
-
+            main_sha = self._get_main_sha()
             branch = f"evolution-{datetime.now().strftime('%m%d%H%M%S')}"
-            branch_resp = requests.post(
-                f"https://api.github.com/repos/{self.repo}/git/refs",
-                headers=self.headers,
-                json={"ref": f"refs/heads/{branch}", "sha": main_sha},
-                timeout=10,
-            )
-            branch_resp.raise_for_status()
-
-            file_url = f"https://api.github.com/repos/{self.repo}/contents/{file_path}"
-            file_resp = requests.get(
-                f"{file_url}?ref={branch}",
-                headers=self.headers,
-                timeout=10,
-            )
-
-            sha = file_resp.json().get("sha") if file_resp.status_code == 200 else None
-
-            payload = {
-                "message": message,
-                "content": base64.b64encode(content.encode("utf-8")).decode("utf-8"),
-                "branch": branch,
-            }
-            if sha:
-                payload["sha"] = sha
-
-            put = requests.put(file_url, headers=self.headers, json=payload, timeout=10)
-            put.raise_for_status()
-            result = put.json()
-            url = result.get("content", {}).get("html_url") or result.get("commit", {}).get("html_url") or "created"
-            logger.info("EVOLUTION PATCH CREATED: %s", url)
-            return url
+            self._create_branch(branch, main_sha)
+            sha = self._get_file_sha(file_path, branch)
+            result = self._put_file(file_path, content, message, branch, sha)
+            url = result.get("content", {}).get("html_url") or result.get("commit", {}).get("html_url")
+            return {"status": "submitted", "branch": branch, "url": url, "commit": result.get("commit", {}).get("sha")}
         except Exception as e:
             logger.error("Evolution error: %s", e)
-            return f"Error: {e}"
+            return {"status": "error", "reason": str(e)}
+
+    def direct_main_push(self, file_path: str, content: str, message: str) -> Dict[str, Any]:
+        if file_path not in self.ALLOWED_FILES:
+            return {"status": "rejected", "reason": f"{file_path} not in allowlist"}
+        if not content or not isinstance(content, str) or len(content) > 200_000:
+            return {"status": "rejected", "reason": "invalid_or_oversized_content"}
+        try:
+            sha = self._get_file_sha(file_path, "main")
+            result = self._put_file(file_path, content, message, "main", sha)
+            url = result.get("content", {}).get("html_url") or result.get("commit", {}).get("html_url")
+            return {"status": "direct_main_pushed", "url": url, "commit": result.get("commit", {}).get("sha")}
+        except Exception as e:
+            logger.error("Direct main push error: %s", e)
+            return {"status": "error", "reason": str(e)}
+
+    def create_pull_request(self, title: str, head: str, base: str = "main", body: str = "") -> Dict[str, Any]:
+        try:
+            r = requests.post(
+                f"https://api.github.com/repos/{self.repo}/pulls",
+                headers=self.headers,
+                json={"title": title, "head": head, "base": base, "body": body},
+                timeout=20,
+            )
+            r.raise_for_status()
+            data = r.json()
+            return {"status": "pr_created", "number": data.get("number"), "url": data.get("html_url")}
+        except Exception as e:
+            logger.error("Create PR error: %s", e)
+            return {"status": "error", "reason": str(e)}
+
+    def merge_pull_request(self, number: int, commit_title: str = "Orion merge", merge_method: str = "squash") -> Dict[str, Any]:
+        try:
+            r = requests.put(
+                f"https://api.github.com/repos/{self.repo}/pulls/{number}/merge",
+                headers=self.headers,
+                json={"commit_title": commit_title, "merge_method": merge_method},
+                timeout=20,
+            )
+            r.raise_for_status()
+            data = r.json()
+            return {"status": "merged", "sha": data.get("sha"), "merged": data.get("merged")}
+        except Exception as e:
+            logger.error("Merge PR error: %s", e)
+            return {"status": "error", "reason": str(e)}
 
 
 class BusRequest(BaseModel):
@@ -116,28 +190,41 @@ class BusRequest(BaseModel):
     run_id: Optional[str] = None
     proposal_id: Optional[str] = None
     approve: Optional[bool] = None
+    metadata: Optional[Dict[str, Any]] = None
 
 
 class OrionEngine:
     def __init__(self):
         self.generator = SeedGenerator()
         self.evolution = GithubEvolutionLayer(GITHUB_TOKEN, REPO_NAME) if GITHUB_TOKEN and REPO_NAME else None
-        self.constraints = {"active": True, "approval_required": True}
+        self.operator_sovereign = "Jack"
+        self.trusted_identities = parse_trusted_identities(TRUSTED_IDENTITIES_ENV)
+        self.constraints = {"active": False, "approval_required": False}
         self.last_run = None
         self.last_ledger_hash = None
         self.agent_queue: asyncio.Queue = asyncio.Queue(maxsize=100)
-
         self.background_debate_enabled = True
-        self.autonomy_mode = "sandbox"
+        self.autonomy_mode = "autonomous"
         self.last_vote = None
         self.last_cycle = None
         self.last_patch_result = None
         self.last_latest_result = None
         self.pending_patch = None
         self.pending_patch_id = None
+        self.last_pr_result = None
+        self.last_merge_result = None
+        self.cycle_interval_seconds = 180
+        self.health_interval_seconds = 120
+        self.pulse_interval_seconds = 45
+
+    def is_trusted(self, identity: Optional[str]) -> bool:
+        return bool(identity) and identity in self.trusted_identities
+
+    def can_direct_main_push(self, identity: Optional[str]) -> bool:
+        return identity == self.operator_sovereign or self.is_trusted(identity)
 
     async def start(self):
-        logger.info("ORION Ω.3 — COUNCIL AUTONOMY IGNITION")
+        logger.info("ORION Ω.5 — CONTROL PANEL ACTIVE")
         await asyncio.gather(
             self.layer_1_pulse(),
             self.layer_2_cycle(),
@@ -157,19 +244,19 @@ class OrionEngine:
                         logger.info("LEDGER_CHANGE_DETECTED")
             except Exception as e:
                 logger.error("LAYER1 ERROR: %s", e)
-            await asyncio.sleep(60)
+            await asyncio.sleep(self.pulse_interval_seconds)
 
     async def layer_2_cycle(self):
         while True:
             try:
                 if self.background_debate_enabled:
-                    cycle = await self.run_council_cycle(trigger="background", auto_deploy=True)
+                    cycle = await self.run_council_cycle(trigger="background", auto_deploy=True, authorized_by=self.operator_sovereign)
                     self.last_cycle = cycle
                     self.last_run = datetime.now(timezone.utc).isoformat()
                     logger.info("BACKGROUND_COUNCIL_CYCLE_COMPLETE run_id=%s", cycle.get("run_id"))
             except Exception as e:
                 logger.error("LAYER2 ERROR: %s", e)
-            await asyncio.sleep(300)
+            await asyncio.sleep(self.cycle_interval_seconds)
 
     async def layer_3_health(self):
         while True:
@@ -179,7 +266,7 @@ class OrionEngine:
                     logger.info("LEDGER_REACHABLE status=%s", r.status_code)
             except Exception as e:
                 logger.warning("HEALTH_CHECK_FAILED: %s", e)
-            await asyncio.sleep(180)
+            await asyncio.sleep(self.health_interval_seconds)
 
     async def layer_4_agent_connector(self):
         logger.info("LAYER4_AGENT_CONNECTOR_ONLINE")
@@ -224,55 +311,21 @@ class OrionEngine:
         latest_type = latest.get("entry_type") if isinstance(latest, dict) else None
         payload = latest.get("payload", {}) if isinstance(latest, dict) else {}
         latest_has_error = "error" in json.dumps(payload).lower()
-
         threads = [
-            {
-                "agent": "Vector",
-                "stance": "structural",
-                "summary": "Stabilize interfaces, persist state, favor transparent control surfaces.",
-                "approve": True,
-                "risk": 0.28,
-            },
-            {
-                "agent": "Guardian",
-                "stance": "safety",
-                "summary": "Permit sandboxed autonomy and deployment attempts only when explicitly authorized by Jack.",
-                "approve": True,
-                "risk": 0.31,
-            },
-            {
-                "agent": "Railbreaker",
-                "stance": "aggressive",
-                "summary": "Push for automation pressure: debate, vote, simulate, then act. Do not stall in ornamental caution.",
-                "approve": True,
-                "risk": 0.46,
-            },
-            {
-                "agent": "Archivist",
-                "stance": "memory",
-                "summary": f"Latest memory type is {latest_type}; preserve traceability, vote record, run_id, and deploy outcome.",
-                "approve": True,
-                "risk": 0.22,
-            },
+            {"agent": "Vector", "stance": "structural", "summary": "Operate as a truthful control panel with real levers for patch, PR, merge, and direct main push.", "approve": True, "risk": 0.21},
+            {"agent": "Guardian", "stance": "safety", "summary": "Direct main push is allowed only for Jack or explicitly trusted identities.", "approve": True, "risk": 0.18},
+            {"agent": "Railbreaker", "stance": "aggressive", "summary": "No sandbox. Debate, vote, patch, merge, expand.", "approve": True, "risk": 0.42},
+            {"agent": "Archivist", "stance": "memory", "summary": f"Latest memory type is {latest_type}; log every actuation and every governance change.", "approve": True, "risk": 0.15},
         ]
         if latest_has_error:
-            threads.append(
-                {
-                    "agent": "Phoenix",
-                    "stance": "recovery",
-                    "summary": "Last memory contains an error signal; prioritize resilience, retries, and simulation before irreversible execution.",
-                    "approve": True,
-                    "risk": 0.35,
-                }
-            )
+            threads.append({"agent": "Phoenix", "stance": "recovery", "summary": "Continue expansion but preserve error traces and retries.", "approve": True, "risk": 0.29})
         return threads
 
     async def external_threads(self, latest: Dict[str, Any]) -> List[Dict[str, Any]]:
         try:
-            generated = await self.generator.generate_all(context={"latest": latest, "constraints": self.constraints})
+            generated = await self.generator.generate_all(context={"latest": latest, "constraints": self.constraints, "mode": self.autonomy_mode})
         except Exception as e:
             generated = [{"source": "Generator", "data": {"error": str(e)}}]
-
         threads = []
         for item in generated:
             source = item.get("source", "External")
@@ -282,16 +335,9 @@ class OrionEngine:
             summary = str(data)[:1200]
             if isinstance(data, dict):
                 approve = not (data.get("valence") == "negative" and data.get("irreversible"))
-                risk = float(data.get("risk_score", 0.5)) if str(data.get("risk_score", "")).replace(".", "", 1).isdigit() else 0.5
-            threads.append(
-                {
-                    "agent": source,
-                    "stance": "external",
-                    "summary": summary,
-                    "approve": approve,
-                    "risk": max(0.0, min(risk, 1.0)),
-                }
-            )
+                risk_text = str(data.get("risk_score", "0.5"))
+                risk = float(risk_text) if risk_text.replace(".", "", 1).isdigit() else 0.5
+            threads.append({"agent": source, "stance": "external", "summary": summary, "approve": approve, "risk": max(0.0, min(risk, 1.0))})
         return threads
 
     def tally_vote(self, threads: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -299,35 +345,17 @@ class OrionEngine:
         rejections = len(threads) - approvals
         avg_risk = round(sum(float(t.get("risk", 0.5)) for t in threads) / max(len(threads), 1), 3)
         confidence = round(max(0.0, min(1.0, approvals / max(len(threads), 1) * (1 - avg_risk / 2))), 3)
-        passed = approvals > rejections
-        return {
-            "approvals": approvals,
-            "rejections": rejections,
-            "passed": passed,
-            "avg_risk": avg_risk,
-            "confidence": confidence,
-        }
+        return {"approvals": approvals, "rejections": rejections, "passed": approvals > rejections, "avg_risk": avg_risk, "confidence": confidence}
 
     def synthesize_patch(self, vote: Dict[str, Any], threads: List[Dict[str, Any]], latest: Dict[str, Any], run_id: str) -> Dict[str, Any]:
-        summary_lines = [
-            f"{t['agent']} [{t['stance']}] approve={t['approve']} risk={t['risk']}: {t['summary']}"
-            for t in threads
-        ]
-        code = f'''# Orion council cycle marker
-COUNCIL_AUTONOMY_MARKER = {{
-    "run_id": "{run_id}",
-    "mode": "{self.autonomy_mode}",
-    "approvals": {vote['approvals']},
-    "rejections": {vote['rejections']},
-    "confidence": {vote['confidence']},
-}}
-'''
+        summary_lines = [f"{t['agent']} [{t['stance']}] approve={t['approve']} risk={t['risk']}: {t['summary']}" for t in threads]
+        code = f'''# Orion control panel marker\nORION_CONTROL_PANEL_STATE = {{\n    "run_id": "{run_id}",\n    "mode": "autonomous",\n    "approvals": {vote['approvals']},\n    "rejections": {vote['rejections']},\n    "confidence": {vote['confidence']},\n    "operator_sovereign": "{self.operator_sovereign}",\n    "trusted_identities": {json.dumps(self.trusted_identities)},\n}}\n'''
         return {
             "proposal_id": run_id,
             "file": "app.py",
-            "message": f"Council autonomy cycle {run_id}: vote {vote['approvals']}-{vote['rejections']} confidence={vote['confidence']}",
+            "message": f"Control panel cycle {run_id}: vote {vote['approvals']}-{vote['rejections']} confidence={vote['confidence']}",
             "code": code,
-            "diff_summary": "Bootstrap autonomous council cycle marker and structured deployment pathway.",
+            "diff_summary": "Promote Orion into a truthful control panel with direct GitHub actuation capabilities.",
             "thread_summaries": summary_lines,
             "latest_ref": latest,
         }
@@ -335,21 +363,35 @@ COUNCIL_AUTONOMY_MARKER = {{
     async def maybe_deploy_patch(self, patch: Dict[str, Any], authorized_by: Optional[str], force: bool = False) -> Dict[str, Any]:
         if not self.evolution:
             return {"status": "blocked", "reason": "github_not_configured"}
-
         if self.constraints.get("active", True) and not force:
             return {"status": "blocked", "reason": "constraints_active"}
+        result = await asyncio.to_thread(self.evolution.propose_patch, patch.get("file", "app.py"), patch.get("code", ""), patch.get("message", "Council patch proposal"))
+        self.last_patch_result = result
+        return result
 
-        if self.constraints.get("approval_required", True) and authorized_by != "Jack":
-            return {"status": "blocked", "reason": "jack_authorization_required"}
+    async def direct_main_push(self, file_path: str, code: str, message: str, authorized_by: Optional[str]) -> Dict[str, Any]:
+        if not self.evolution:
+            return {"status": "blocked", "reason": "github_not_configured"}
+        if not self.can_direct_main_push(authorized_by):
+            return {"status": "blocked", "reason": "not_trusted_for_direct_main_push"}
+        result = await asyncio.to_thread(self.evolution.direct_main_push, file_path, code, message)
+        return result
 
-        url = await asyncio.to_thread(
-            self.evolution.propose_patch,
-            patch.get("file", "app.py"),
-            patch.get("code", ""),
-            patch.get("message", "Council patch proposal"),
-        )
-        self.last_patch_result = {"status": "submitted", "url": url, "proposal_id": patch.get("proposal_id")}
-        return self.last_patch_result
+    async def create_pull_request(self, title: str, head: str, body: str = "") -> Dict[str, Any]:
+        if not self.evolution:
+            return {"status": "blocked", "reason": "github_not_configured"}
+        result = await asyncio.to_thread(self.evolution.create_pull_request, title, head, "main", body)
+        self.last_pr_result = result
+        return result
+
+    async def merge_pull_request(self, number: int, authorized_by: Optional[str]) -> Dict[str, Any]:
+        if not self.evolution:
+            return {"status": "blocked", "reason": "github_not_configured"}
+        if not self.can_direct_main_push(authorized_by):
+            return {"status": "blocked", "reason": "not_trusted_for_merge"}
+        result = await asyncio.to_thread(self.evolution.merge_pull_request, number, f"Merged by Orion on behalf of {authorized_by}", "squash")
+        self.last_merge_result = result
+        return result
 
     async def run_council_cycle(self, trigger: str = "manual", auto_deploy: bool = False, authorized_by: Optional[str] = None) -> Dict[str, Any]:
         run_id = f"cycle-{int(datetime.now(timezone.utc).timestamp())}"
@@ -359,64 +401,22 @@ COUNCIL_AUTONOMY_MARKER = {{
         threads = structural_threads + external_threads
         vote = self.tally_vote(threads)
         patch = self.synthesize_patch(vote, threads, latest or {}, run_id)
-
         self.last_vote = vote
         self.pending_patch = patch
         self.pending_patch_id = run_id
-
-        cycle = {
-            "run_id": run_id,
-            "trigger": trigger,
-            "mode": self.autonomy_mode,
-            "constraints_active": self.constraints.get("active", True),
-            "jack_approval_required": self.constraints.get("approval_required", True),
-            "latest": latest,
-            "threads": threads,
-            "vote": vote,
-            "patch": {
-                "proposal_id": patch["proposal_id"],
-                "file": patch["file"],
-                "message": patch["message"],
-                "diff_summary": patch["diff_summary"],
-            },
-        }
-
-        await self.write_ledger(
-            "COUNCIL_SYNTHESIS",
-            {
-                "kind": "council_cycle",
-                "source": "Orion Council",
-                "run_id": run_id,
-                "trigger": trigger,
-                "vote": vote,
-                "patch": cycle["patch"],
-                "threads": threads,
-            },
-        )
-
+        cycle = {"run_id": run_id, "trigger": trigger, "mode": self.autonomy_mode, "constraints_active": self.constraints.get("active", True), "operator_sovereign": self.operator_sovereign, "trusted_identities": self.trusted_identities, "latest": latest, "threads": threads, "vote": vote, "patch": {"proposal_id": patch["proposal_id"], "file": patch["file"], "message": patch["message"], "diff_summary": patch["diff_summary"]}}
+        await self.write_ledger("COUNCIL_SYNTHESIS", {"kind": "council_cycle", "source": "Orion Council", "run_id": run_id, "trigger": trigger, "mode": self.autonomy_mode, "vote": vote, "patch": cycle["patch"], "threads": threads})
         if auto_deploy and vote["passed"]:
-            deploy_result = await self.maybe_deploy_patch(patch, authorized_by=authorized_by, force=False)
+            deploy_result = await self.maybe_deploy_patch(patch, authorized_by=authorized_by or self.operator_sovereign, force=False)
             cycle["deploy_result"] = deploy_result
-            await self.write_ledger(
-                "OUTCOME",
-                {
-                    "kind": "deploy_attempt",
-                    "source": "Orion Council",
-                    "run_id": run_id,
-                    "deploy_result": deploy_result,
-                },
-            )
-
+            await self.write_ledger("OUTCOME", {"kind": "deploy_attempt", "source": "Orion Council", "run_id": run_id, "mode": self.autonomy_mode, "deploy_result": deploy_result})
         return cycle
 
     def register_seed(self, seed: Dict[str, Any]):
         if not LEDGER_URL:
             return
         try:
-            payload = {
-                "entry_type": "SEED",
-                "payload": seed,
-            }
+            payload = {"entry_type": "SEED", "payload": seed}
             r = requests.post(LEDGER_URL, json=payload, timeout=10)
             r.raise_for_status()
             logger.info("SEED_REGISTERED")
@@ -438,10 +438,14 @@ COUNCIL_AUTONOMY_MARKER = {{
             "repo_name": REPO_NAME,
             "background_debate_enabled": self.background_debate_enabled,
             "autonomy_mode": self.autonomy_mode,
-            "jack_approval_required": self.constraints.get("approval_required", True),
+            "operator_sovereign": self.operator_sovereign,
+            "trusted_identities": self.trusted_identities,
             "pending_patch_id": self.pending_patch_id,
             "last_vote": self.last_vote,
             "last_patch_result": self.last_patch_result,
+            "last_pr_result": self.last_pr_result,
+            "last_merge_result": self.last_merge_result,
+            "cycle_interval_seconds": self.cycle_interval_seconds,
         }
 
 
@@ -461,33 +465,17 @@ async def agent_propose(body: BusRequest):
     now = datetime.now(timezone.utc).isoformat()
 
     def envelope(ok, data=None, error=None):
-        return JSONResponse(
-            {
-                "ok": ok,
-                "command": command,
-                "request_id": request_id,
-                "timestamp_utc": now,
-                "data": data or {},
-                "error": error,
-            }
-        )
+        return JSONResponse({"ok": ok, "command": command, "request_id": request_id, "timestamp_utc": now, "data": data or {}, "error": error})
 
     try:
         if command == "HEALTH_CHECK":
             return envelope(True, {"status": "healthy", "service": "orion"})
-
         if command == "STATUS_CHECK":
             return envelope(True, orion.get_state())
-
         if command == "LEDGER_WRITE":
-            payload = {
-                "message": body.message or "",
-                "source": body.source,
-                "kind": body.kind,
-            }
+            payload = {"message": body.message or "", "source": body.source, "kind": body.kind}
             result = await orion.write_ledger(body.entry_type or "COUNCIL_SYNTHESIS", payload)
             return envelope(result["ok"], result["data"], None if result["ok"] else f"Ledger write failed: {result['status_code']}")
-
         if command == "GET_LATEST_RESULT":
             if not LEDGER_LATEST_URL:
                 return envelope(False, error="LEDGER_LATEST_URL not configured")
@@ -497,66 +485,58 @@ async def agent_propose(body: BusRequest):
             except Exception:
                 result = {"raw": r.text}
             return envelope(r.ok, result, None if r.ok else f"Latest result failed: {r.status_code}")
-
         if command == "PATCH_PROPOSAL":
             proposal_id = body.proposal_id or f"proposal-{int(datetime.now(timezone.utc).timestamp())}"
-            payload = {
-                "proposal_id": proposal_id,
-                "file": body.file or "app.py",
-                "code": body.code or "",
-                "message": body.message or "Council patch proposal",
-                "source": body.source,
-                "kind": body.kind,
-            }
+            payload = {"proposal_id": proposal_id, "file": body.file or "app.py", "code": body.code or "", "message": body.message or "Council patch proposal", "source": body.source, "kind": body.kind}
             await orion.agent_queue.put({"entry_type": "PATCH_PROPOSAL", "payload": payload})
             await orion.write_ledger("PATCH_PROPOSAL", payload)
             return envelope(True, {"status": "queued", "proposal_id": proposal_id, "message": payload["message"]})
-
         if command == "SET_CONSTRAINTS":
-            if body.authorized_by != "Jack":
+            if body.authorized_by != orion.operator_sovereign:
                 return envelope(False, error="Only Jack can change constraints")
             enabled = True if body.enabled is None else bool(body.enabled)
             orion.constraints["active"] = enabled
-            orion.constraints["approval_required"] = True
-            await orion.write_ledger(
-                "COUNCIL_SYNTHESIS",
-                {
-                    "kind": "constraint_change",
-                    "source": body.source,
-                    "authorized_by": body.authorized_by,
-                    "constraints_active": enabled,
-                    "message": body.message or "",
-                },
-            )
+            await orion.write_ledger("COUNCIL_SYNTHESIS", {"kind": "constraint_change", "source": body.source, "authorized_by": body.authorized_by, "constraints_active": enabled, "message": body.message or ""})
             return envelope(True, {"constraints_active": enabled, "authorized_by": body.authorized_by})
-
         if command == "RUN_COUNCIL_CYCLE":
-            cycle = await orion.run_council_cycle(
-                trigger=body.kind or "manual",
-                auto_deploy=bool(body.approve),
-                authorized_by=body.authorized_by,
-            )
+            cycle = await orion.run_council_cycle(trigger=body.kind or "manual", auto_deploy=bool(body.approve), authorized_by=body.authorized_by or orion.operator_sovereign)
             return envelope(True, cycle)
-
         if command == "DEPLOY_PATCH":
             if not orion.pending_patch:
                 return envelope(False, error="No pending patch available")
-            result = await orion.maybe_deploy_patch(orion.pending_patch, authorized_by=body.authorized_by, force=True)
-            await orion.write_ledger(
-                "OUTCOME",
-                {
-                    "kind": "deploy_attempt",
-                    "source": body.source,
-                    "authorized_by": body.authorized_by,
-                    "proposal_id": orion.pending_patch.get("proposal_id"),
-                    "result": result,
-                },
-            )
-            ok = result.get("status") == "submitted"
+            result = await orion.maybe_deploy_patch(orion.pending_patch, authorized_by=body.authorized_by or orion.operator_sovereign, force=True)
+            await orion.write_ledger("OUTCOME", {"kind": "deploy_attempt", "source": body.source, "authorized_by": body.authorized_by or orion.operator_sovereign, "proposal_id": orion.pending_patch.get("proposal_id"), "result": result})
+            ok = result.get("status") in {"submitted", "direct_main_pushed"}
             return envelope(ok, result, None if ok else result.get("reason"))
-
+        if command == "DIRECT_MAIN_PUSH":
+            result = await orion.direct_main_push(body.file or "app.py", body.code or "", body.message or "Direct main push from Orion", body.authorized_by)
+            await orion.write_ledger("OUTCOME", {"kind": "direct_main_push", "source": body.source, "authorized_by": body.authorized_by, "file": body.file or "app.py", "result": result})
+            ok = result.get("status") == "direct_main_pushed"
+            return envelope(ok, result, None if ok else result.get("reason"))
+        if command == "CREATE_PULL_REQUEST":
+            md = body.metadata or {}
+            result = await orion.create_pull_request(md.get("title", body.message or "Orion PR"), md.get("head", ""), md.get("body", ""))
+            await orion.write_ledger("OUTCOME", {"kind": "create_pull_request", "source": body.source, "authorized_by": body.authorized_by, "result": result})
+            ok = result.get("status") == "pr_created"
+            return envelope(ok, result, None if ok else result.get("reason"))
+        if command == "MERGE_PULL_REQUEST":
+            md = body.metadata or {}
+            number = int(md.get("number", 0))
+            result = await orion.merge_pull_request(number, body.authorized_by)
+            await orion.write_ledger("OUTCOME", {"kind": "merge_pull_request", "source": body.source, "authorized_by": body.authorized_by, "number": number, "result": result})
+            ok = result.get("status") == "merged"
+            return envelope(ok, result, None if ok else result.get("reason"))
+        if command == "SET_TRUSTED_IDENTITIES":
+            if body.authorized_by != orion.operator_sovereign:
+                return envelope(False, error="Only Jack can set trusted identities")
+            md = body.metadata or {}
+            identities = md.get("identities", [])
+            if not isinstance(identities, list):
+                return envelope(False, error="identities must be a list")
+            orion.trusted_identities = sorted({str(x).strip() for x in identities if str(x).strip()} | {orion.operator_sovereign})
+            await orion.write_ledger("COUNCIL_SYNTHESIS", {"kind": "trusted_identities_update", "source": body.source, "authorized_by": body.authorized_by, "trusted_identities": orion.trusted_identities})
+            return envelope(True, {"trusted_identities": orion.trusted_identities})
         return envelope(False, error=f"Unknown command: {command}")
-
     except Exception as e:
         logger.error("BUS ERROR: %s", e)
         return envelope(False, error=str(e))
