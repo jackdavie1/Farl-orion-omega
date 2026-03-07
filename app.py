@@ -227,60 +227,243 @@ async def view_dashboard():
       <meta http-equiv='Expires' content='0'>
       <title>FARL Orion View</title>
       <style>
-        body { font-family: ui-sans-serif, system-ui, sans-serif; background:#0a0a0f; color:#f2f2f7; margin:0; padding:18px; }
-        .top { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap; }
-        .grid { display:grid; grid-template-columns: repeat(auto-fit,minmax(320px,1fr)); gap:16px; margin-top:16px; }
-        .card { background:#141423; border:1px solid #2a2a42; border-radius:18px; padding:16px; box-shadow:0 8px 24px rgba(0,0,0,0.25); }
-        h1,h2 { margin:0 0 12px 0; }
-        .muted { color:#b9b9c8; }
-        .statusline { margin-top:8px; font-size:12px; color:#9ecbff; }
-        button { background:#232342; border:1px solid #4a4a72; color:#fff; padding:10px 12px; border-radius:12px; margin:4px; cursor:pointer; }
-        textarea { width:100%; min-height:110px; border-radius:14px; background:#0d0d18; color:#fff; border:1px solid #3a3a58; padding:12px; box-sizing:border-box; }
-        .chapter { border:1px solid #2a2a42; border-radius:14px; padding:12px; margin-bottom:10px; background:#10101b; }
-        .chapter-title { font-size:12px; color:#9ecbff; margin-bottom:6px; }
-        .chapter-body { font-size:13px; line-height:1.45; white-space:pre-wrap; word-break:break-word; }
-        .mono { white-space:pre-wrap; word-break:break-word; font-size:12px; }
+        :root {
+          --bg: #090912;
+          --panel: rgba(20,20,35,0.84);
+          --panel-2: rgba(15,15,28,0.95);
+          --line: rgba(114,114,196,0.24);
+          --text: #f4f6ff;
+          --muted: #b8c1d9;
+          --accent: #8ab4ff;
+          --accent-2: #9d7bff;
+          --good: #8ee3a5;
+          --warn: #ffd27d;
+          --bad: #ff8d8d;
+          --shadow: 0 16px 48px rgba(0,0,0,0.35);
+        }
+        * { box-sizing: border-box; }
+        body {
+          font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+          background: radial-gradient(circle at top, #121226 0%, #090912 55%, #06060d 100%);
+          color: var(--text);
+          margin: 0;
+          padding: 18px;
+        }
+        .wrap { max-width: 1600px; margin: 0 auto; }
+        .hero {
+          display: grid;
+          grid-template-columns: 1.2fr .95fr;
+          gap: 16px;
+          margin-bottom: 16px;
+        }
+        .panel {
+          background: var(--panel);
+          border: 1px solid var(--line);
+          border-radius: 24px;
+          box-shadow: var(--shadow);
+          backdrop-filter: blur(10px);
+          padding: 18px;
+        }
+        .hero-title { font-size: 54px; font-weight: 800; line-height: 1; letter-spacing: -0.03em; margin: 4px 0 10px; }
+        .hero-sub { color: var(--muted); max-width: 900px; font-size: 18px; line-height: 1.45; }
+        .statusbar { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+        .pill {
+          background: rgba(138,180,255,0.11);
+          border: 1px solid rgba(138,180,255,0.22);
+          padding: 8px 12px;
+          border-radius: 999px;
+          font-size: 12px;
+          color: #d9e7ff;
+        }
+        .hero-right { display: flex; flex-direction: column; gap: 12px; }
+        .compose textarea {
+          width: 100%;
+          min-height: 130px;
+          border-radius: 18px;
+          border: 1px solid rgba(138,180,255,0.18);
+          background: rgba(9,9,18,0.72);
+          color: #fff;
+          padding: 14px;
+          resize: vertical;
+          font-size: 15px;
+        }
+        .button-row { display:flex; flex-wrap:wrap; gap:10px; margin-top:12px; }
+        button {
+          background: linear-gradient(180deg, rgba(61,70,130,0.95), rgba(34,36,72,0.95));
+          border: 1px solid rgba(138,180,255,0.18);
+          color: #fff;
+          padding: 12px 15px;
+          border-radius: 16px;
+          cursor: pointer;
+          font-size: 14px;
+          box-shadow: 0 10px 20px rgba(0,0,0,0.18);
+        }
+        button:hover { transform: translateY(-1px); }
+        .dashboard {
+          display: grid;
+          grid-template-columns: repeat(12, 1fr);
+          gap: 16px;
+        }
+        .span-3 { grid-column: span 3; }
+        .span-4 { grid-column: span 4; }
+        .span-6 { grid-column: span 6; }
+        .span-8 { grid-column: span 8; }
+        .span-12 { grid-column: span 12; }
+        .section-title { font-size: 24px; font-weight: 700; margin: 0 0 10px; }
+        .subtle { color: var(--muted); font-size: 13px; }
+        .stat-grid { display:grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap:12px; }
+        .stat {
+          background: rgba(11,11,20,0.58);
+          border: 1px solid rgba(138,180,255,0.10);
+          border-radius: 18px;
+          padding: 14px;
+        }
+        .stat-label { color: var(--muted); font-size: 12px; }
+        .stat-value { font-size: 24px; font-weight: 800; margin-top: 4px; }
+        .mono { white-space: pre-wrap; word-break: break-word; font-size: 12px; color:#dfe6ff; }
+        .feed {
+          max-height: 660px;
+          overflow: auto;
+          padding-right: 6px;
+        }
+        .feed::-webkit-scrollbar { width: 10px; }
+        .feed::-webkit-scrollbar-thumb { background: rgba(138,180,255,0.18); border-radius: 999px; }
+        .entry {
+          background: linear-gradient(180deg, rgba(18,18,33,0.96), rgba(13,13,24,0.96));
+          border: 1px solid rgba(138,180,255,0.10);
+          border-radius: 18px;
+          padding: 14px;
+          margin-bottom: 12px;
+        }
+        .entry-head {
+          display:flex; justify-content:space-between; gap:12px; align-items:center; margin-bottom:8px;
+          font-size:12px; color: var(--accent);
+        }
+        .entry-body { white-space: pre-wrap; word-break: break-word; line-height: 1.45; font-size: 13px; color: #eef2ff; }
+        .alert-good { color: var(--good); }
+        .alert-warn { color: var(--warn); }
+        .alert-bad { color: var(--bad); }
+        .mini-feed { max-height: 270px; overflow:auto; }
+        @media (max-width: 1100px) {
+          .hero { grid-template-columns: 1fr; }
+          .span-3, .span-4, .span-6, .span-8, .span-12 { grid-column: span 12; }
+        }
       </style>
     </head>
     <body>
-      <div class='top'>
-        <div>
-          <h1>FARL Orion View</h1>
-          <div class='muted'>Live institution surface: council, divisions, workers, verification, snapshots, deploy sims, hierarchy, mutation proposals, rollback targets, and executed artifacts.</div>
-          <div class='statusline' id='statusline'>connecting...</div>
+      <div class='wrap'>
+        <div class='hero'>
+          <div class='panel'>
+            <div class='hero-title'>FARL Orion View</div>
+            <div class='hero-sub'>A living institution surface for counciling, workers, spend mastery, verification, deploy simulations, and bounded autonomous mutation.</div>
+            <div class='statusbar' id='statusbar'>connecting...</div>
+          </div>
+          <div class='panel hero-right compose'>
+            <div class='section-title'>Operator → Council</div>
+            <div class='subtle'>Type a suggestion, demand, or strategic note and send it directly into the live council feed.</div>
+            <textarea id='operatorNote' placeholder='Guide the council here...'></textarea>
+            <div class='button-row'>
+              <button onclick="sendNote()">Send to council</button>
+              <button onclick="control('RUN_AUTONOMOUS_IMPLEMENTATION')">Autonomous closure</button>
+              <button onclick="control('RUN_COUNCIL_CYCLE')">Run council cycle</button>
+              <button onclick="control('RUN_RESEARCH_CYCLE')">Run research cycle</button>
+              <button onclick="toggleAutonomy(true)">Autonomy ON</button>
+              <button onclick="toggleAutonomy(false)">Autonomy OFF</button>
+              <button onclick="snapshotNow()">Create snapshot</button>
+              <button onclick="clearChat()">Clear chat</button>
+              <button onclick="control('COUNCIL_ELECT_LEADER')">Elect leader</button>
+            </div>
+          </div>
         </div>
-        <div class='card' style='max-width:520px; min-width:320px;'>
-          <h2>Operator → Council</h2>
-          <textarea id='operatorNote' placeholder='Type a suggestion, demand, or strategic note to send directly into the council feed...'></textarea>
-          <div style='margin-top:10px;'>
-            <button onclick="sendNote()">Send to council</button>
-            <button onclick="control('RUN_AUTONOMOUS_IMPLEMENTATION')">Autonomous closure</button>
-            <button onclick="control('RUN_COUNCIL_CYCLE')">Run council cycle</button>
-            <button onclick="control('RUN_RESEARCH_CYCLE')">Run research cycle</button>
-            <button onclick="toggleAutonomy(true)">Autonomy ON</button>
-            <button onclick="toggleAutonomy(false)">Autonomy OFF</button>
-            <button onclick="snapshotNow()">Create snapshot</button>
-            <button onclick="clearChat()">Clear chat</button>
-            <button onclick="control('COUNCIL_ELECT_LEADER')">Elect leader</button>
+
+        <div class='dashboard'>
+          <div class='panel span-4'>
+            <div class='section-title'>Core State</div>
+            <div class='stat-grid'>
+              <div class='stat'><div class='stat-label'>Leader</div><div class='stat-value' id='leader'>-</div></div>
+              <div class='stat'><div class='stat-label'>Workers</div><div class='stat-value' id='workersCount'>-</div></div>
+              <div class='stat'><div class='stat-label'>Verify</div><div class='stat-value' id='verifyStatus'>-</div></div>
+              <div class='stat'><div class='stat-label'>Spend Total</div><div class='stat-value' id='spendTotal'>-</div></div>
+              <div class='stat'><div class='stat-label'>Last Spend</div><div class='stat-value' id='spendLast'>-</div></div>
+              <div class='stat'><div class='stat-label'>Meetings</div><div class='stat-value' id='meetingCount'>-</div></div>
+            </div>
+            <div class='mono' id='state' style='margin-top:14px;'>loading...</div>
+          </div>
+
+          <div class='panel span-4'>
+            <div class='section-title'>Token Master</div>
+            <div class='mono' id='tokenMaster'>loading...</div>
+            <div class='mini-feed' id='tokenFeed' style='margin-top:12px;'></div>
+          </div>
+
+          <div class='panel span-4'>
+            <div class='section-title'>Verification & Wake</div>
+            <div class='mono' id='verification'>loading...</div>
+            <div class='mono' id='wake' style='margin-top:12px;'>loading...</div>
+          </div>
+
+          <div class='panel span-8'>
+            <div class='section-title'>Council Feed</div>
+            <div class='feed' id='councilFeed'>loading...</div>
+          </div>
+
+          <div class='panel span-4'>
+            <div class='section-title'>Workers</div>
+            <div class='feed' id='workersFeed'>loading...</div>
+          </div>
+
+          <div class='panel span-4'>
+            <div class='section-title'>Divisions</div>
+            <div class='feed' id='divisionsFeed'>loading...</div>
+          </div>
+
+          <div class='panel span-4'>
+            <div class='section-title'>Governance & Audit</div>
+            <div class='feed' id='governanceFeed'>loading...</div>
+          </div>
+
+          <div class='panel span-4'>
+            <div class='section-title'>Deploy Sims</div>
+            <div class='feed' id='simsFeed'>loading...</div>
+          </div>
+
+          <div class='panel span-4'>
+            <div class='section-title'>Snapshots</div>
+            <div class='feed' id='snapshotsFeed'>loading...</div>
+          </div>
+
+          <div class='panel span-4'>
+            <div class='section-title'>Artifacts</div>
+            <div class='feed' id='artifactsFeed'>loading...</div>
+          </div>
+
+          <div class='panel span-6'>
+            <div class='section-title'>Executed Artifacts</div>
+            <div class='mono' id='executed'>loading...</div>
+          </div>
+
+          <div class='panel span-3'>
+            <div class='section-title'>Hierarchy</div>
+            <div class='mono' id='hierarchy'>loading...</div>
+          </div>
+
+          <div class='panel span-3'>
+            <div class='section-title'>Mutation Proposals</div>
+            <div class='mono' id='proposals'>loading...</div>
+          </div>
+
+          <div class='panel span-3'>
+            <div class='section-title'>Rollback Targets</div>
+            <div class='mono' id='rollback'>loading...</div>
+          </div>
+
+          <div class='panel span-3'>
+            <div class='section-title'>Autonomous Closures</div>
+            <div class='mono' id='closures'>loading...</div>
           </div>
         </div>
       </div>
-      <div class='grid'>
-        <div class='card'><h2>State</h2><div class='mono' id='state'>loading...</div></div>
-        <div class='card'><h2>Wake Packet</h2><div class='mono' id='wake'>loading...</div></div>
-        <div class='card'><h2>Council Thread</h2><div id='council'>loading...</div></div>
-        <div class='card'><h2>Division Thread</h2><div id='divisions'>loading...</div></div>
-        <div class='card'><h2>Workers</h2><div id='workers'>loading...</div></div>
-        <div class='card'><h2>Verification</h2><div class='mono' id='verification'>loading...</div></div>
-        <div class='card'><h2>Governance / Audit</h2><div id='governance'>loading...</div></div>
-        <div class='card'><h2>Deploy Sims</h2><div id='sims'>loading...</div></div>
-        <div class='card'><h2>Snapshots</h2><div id='snapshots'>loading...</div></div>
-        <div class='card'><h2>Artifacts</h2><div id='artifacts'>loading...</div></div>
-        <div class='card'><h2>Executed Artifacts</h2><div class='mono' id='executed'>loading...</div></div>
-        <div class='card'><h2>Hierarchy / Delegation</h2><div class='mono' id='hierarchy'>loading...</div></div>
-        <div class='card'><h2>Mutation Proposals</h2><div class='mono' id='proposals'>loading...</div></div>
-        <div class='card'><h2>Rollback Targets</h2><div class='mono' id='rollback'>loading...</div></div>
-      </div>
+
       <script>
         async function getJson(url) {
           const r = await fetch(url, { cache: 'no-store' });
@@ -290,39 +473,61 @@ async def view_dashboard():
         function escapeHtml(str) {
           return String(str).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
         }
-        function chapterize(items) {
-          if (!items || !items.length) return '<div class="muted">No entries yet.</div>';
-          return items.slice(-12).reverse().map((item, idx) => {
+        function entryize(items) {
+          if (!items || !items.length) return '<div class="subtle">No entries yet.</div>';
+          return items.slice(-18).reverse().map((item, idx) => {
             const ts = item.ts || item.content?.ts || 'time-unknown';
             const body = item.content ? JSON.stringify(item.content, null, 2) : JSON.stringify(item, null, 2);
-            return `<div class="chapter"><div class="chapter-title">Chapter ${idx + 1} • ${escapeHtml(ts)}</div><div class="chapter-body">${escapeHtml(body)}</div></div>`;
+            return `<div class="entry"><div class="entry-head"><span>Entry ${idx + 1}</span><span>${escapeHtml(ts)}</span></div><div class="entry-body">${escapeHtml(body)}</div></div>`;
           }).join('');
         }
+        function money(v) {
+          const n = Number(v || 0);
+          return '$' + n.toFixed(4);
+        }
         async function refresh() {
-          const now = new Date().toLocaleTimeString();
           try {
             const [state, stream, wake] = await Promise.all([
               getJson('/view/state?ts=' + Date.now()),
               getJson('/view/stream?ts=' + Date.now()),
               getJson('/view/wake?ts=' + Date.now()),
             ]);
+            const spend = state.spend_state || { total_usd: 0, last_estimate_usd: 0 };
+            const ver = state.last_verification || {};
             document.getElementById('state').textContent = JSON.stringify(state, null, 2);
             document.getElementById('wake').textContent = JSON.stringify(wake, null, 2);
-            document.getElementById('council').innerHTML = chapterize(stream.channels.council || []);
-            document.getElementById('divisions').innerHTML = chapterize(stream.channels.divisions || []);
-            document.getElementById('workers').innerHTML = chapterize(stream.channels.workers || []);
-            document.getElementById('governance').innerHTML = chapterize(stream.channels.governance || []);
-            document.getElementById('sims').innerHTML = chapterize(stream.channels.deploy_sims || []);
-            document.getElementById('snapshots').innerHTML = chapterize(stream.channels.snapshots || []);
-            document.getElementById('artifacts').innerHTML = chapterize(stream.channels.artifacts || []);
+            document.getElementById('verification').textContent = JSON.stringify(ver, null, 2);
             document.getElementById('executed').textContent = JSON.stringify(state.executed_artifacts || [], null, 2);
-            document.getElementById('verification').textContent = JSON.stringify(state.last_verification || {}, null, 2);
             document.getElementById('hierarchy').textContent = JSON.stringify(state.delegation_map || {}, null, 2);
             document.getElementById('proposals').textContent = JSON.stringify(state.mutation_proposals || [], null, 2);
             document.getElementById('rollback').textContent = JSON.stringify(state.rollback_targets || [], null, 2);
-            document.getElementById('statusline').textContent = `live • refresh ${now} • last run ${state.last_run || 'n/a'} • meetings ${state.meeting_stream_size ?? 'n/a'} • leader ${state.leader || 'n/a'} • workers ${(state.free_agents || []).length} • verify ${(state.last_verification || {}).status || 'n/a'}`;
+            document.getElementById('closures').textContent = JSON.stringify(state.autonomous_closure_log || [], null, 2);
+            document.getElementById('tokenMaster').textContent = JSON.stringify(state.token_master || {}, null, 2);
+            document.getElementById('tokenFeed').innerHTML = entryize(stream.channels.token_master || []);
+            document.getElementById('councilFeed').innerHTML = entryize(stream.channels.council || []);
+            document.getElementById('workersFeed').innerHTML = entryize(stream.channels.workers || []);
+            document.getElementById('divisionsFeed').innerHTML = entryize(stream.channels.divisions || []);
+            document.getElementById('governanceFeed').innerHTML = entryize(stream.channels.governance || []);
+            document.getElementById('simsFeed').innerHTML = entryize(stream.channels.deploy_sims || []);
+            document.getElementById('snapshotsFeed').innerHTML = entryize(stream.channels.snapshots || []);
+            document.getElementById('artifactsFeed').innerHTML = entryize(stream.channels.artifacts || []);
+            document.getElementById('leader').textContent = state.leader || '-';
+            document.getElementById('workersCount').textContent = String((state.free_agents || []).length);
+            document.getElementById('verifyStatus').textContent = ver.status || '-';
+            document.getElementById('spendTotal').textContent = money(spend.total_usd);
+            document.getElementById('spendLast').textContent = money(spend.last_estimate_usd);
+            document.getElementById('meetingCount').textContent = String(state.meeting_stream_size || 0);
+            const statusPills = [
+              `leader ${state.leader || 'n/a'}`,
+              `autonomy ${state.autonomy_mode || 'n/a'}`,
+              `workers ${(state.free_agents || []).length}`,
+              `verify ${ver.status || 'n/a'}`,
+              `spend ${money(spend.total_usd)}`,
+              `last run ${state.last_run || 'n/a'}`,
+            ];
+            document.getElementById('statusbar').innerHTML = statusPills.map(t => `<span class="pill">${escapeHtml(t)}</span>`).join('');
           } catch (err) {
-            document.getElementById('statusline').textContent = `refresh error • ${err}`;
+            document.getElementById('statusbar').innerHTML = `<span class="pill alert-bad">refresh error ${escapeHtml(err)}</span>`;
           }
         }
         async function post(body) {
@@ -420,6 +625,7 @@ async def agent_propose(body: BusRequest):
             engine.stream_channels["governance"] = []
             engine.stream_channels["artifacts"] = []
             engine.stream_channels["workers"] = []
+            engine.stream_channels["token_master"] = []
             await engine.write_ledger("COUNCIL_SYNTHESIS", {"kind": "operator_clear_chat", "source": body.source, "authorized_by": body.authorized_by or "Jack", "ts": utc_now()})
             return envelope(True, {"status": "chat_cleared"})
         if command == "LEDGER_WRITE":
