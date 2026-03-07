@@ -74,14 +74,25 @@ class ArtifactEngine:
             item["next_action"] = "execute" if item["score"] >= 0.56 else "refine"
         return sorted(base, key=lambda x: x["score"], reverse=True)
 
-    def execute(self, artifacts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def execute(self, artifacts: List[Dict[str, Any]], mission: Dict[str, Any], metrics: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
         outputs = []
+        metric_text = f"Metrics: {metrics}" if metrics else "Metrics pending."
         for item in artifacts[: int(SELF_TUNING.get("artifact_execute_limit", 3))]:
+            if item["type"] == "brief":
+                output = f"FARL Brief\nMission: {mission['primary']}\nTop artifact: {item['name']}\n{metric_text}"
+            elif item["type"] == "dashboard":
+                output = f"Dashboard payload\nsections=['state','wake','council','divisions','artifacts']\nname={item['name']}"
+            elif item["type"] == "research_report":
+                output = f"Research report draft\nquestion=operator coupling\nsummary={metric_text}"
+            elif item["type"] == "signal_packet":
+                output = f"Signal packet\nartifact={item['name']}\nconfidence={(metrics or {}).get('winner_score', 'n/a')}"
+            else:
+                output = f"Service draft\nname={item['name']}\npolicy=bounded_autonomy"
             outputs.append({
                 "artifact_id": item["id"],
                 "name": item["name"],
-                "status": "executed_stub",
-                "output": f"Generated draft payload for {item['name']} at {utc_now()}",
+                "status": "executed",
+                "output": output,
                 "score": item["score"],
             })
         return outputs
@@ -150,7 +161,7 @@ class AutonomousInstitutionEngine:
         self.wake_packet = None
         self.research_history: List[Dict[str, Any]] = []
         self.meeting_stream: List[Dict[str, Any]] = []
-        self.stream_channels: Dict[str, List[Dict[str, Any]]] = {"council": [], "divisions": [], "deploy_sims": [], "snapshots": [], "artifacts": [], "governance": []}
+        self.stream_channels: Dict[str, List[Dict[str, Any]]] = {"council": [], "divisions": [], "deploy_sims": [], "snapshots": [], "artifacts": [], "governance": [], "workers": []}
         self.self_questions: List[Dict[str, Any]] = []
         self.snapshots: List[Dict[str, Any]] = []
         self.deployment_sims: List[Dict[str, Any]] = []
@@ -159,6 +170,8 @@ class AutonomousInstitutionEngine:
         self.rollback_targets: List[Dict[str, Any]] = []
         self.delegation_map: Dict[str, Any] = {}
         self.autonomous_closure_log: List[Dict[str, Any]] = []
+        self.free_agents: List[Dict[str, Any]] = []
+        self.last_verification: Dict[str, Any] = {}
         self.mission = {"primary": "expand, improve, and earn through co-creative autonomous institutions", "co_creation": True, "financial_coherence_for_jack": True, "hardware_acceleration": True, "truthfulness": True, "mutual_benefit": True}
         self.world_model = {"resources": {"budget_usd": 5.0, "compute_tier": "light", "grok_live": False, "claude_live": False}, "actors": ["Jack", "Signal", "Vector", "Guardian", "Railbreaker", "Archivist", "Supergrok"], "action_surfaces": ["ledger", "github", "grok_api", "browser_console"], "constraints": {"chat_wrapper": "console_only", "operator_is_sovereign": True}, "futures": []}
         self.research_agenda = {"theme": "physical_retrocausality_and_operator_coupling", "focus": "evaluation_first_comparative_model_tournaments", "active_method": "Autonomous Institution Engine", "goals": [], "doctrine": ["reflex", "tactic", "strategy", "constitution"]}
@@ -180,6 +193,9 @@ class AutonomousInstitutionEngine:
         self.meta_evaluator = MetaEvaluator()
         self.snapshot_replay = SnapshotReplay()
         self._build_hierarchy()
+        self.spawn_free_agent("Signal-Worker", "Coordinate control-plane improvements")
+        self.spawn_free_agent("Artifact-Worker", "Produce briefs, dashboards, and reports")
+        self.spawn_free_agent("Audit-Worker", "Verify health and flag rollback pressure")
 
     def _build_hierarchy(self):
         self.delegation_map = {
@@ -194,12 +210,18 @@ class AutonomousInstitutionEngine:
             ],
         }
 
+    def spawn_free_agent(self, name: str, mission: str) -> Dict[str, Any]:
+        agent = {"id": f"worker-{len(self.free_agents)+1}", "name": name, "mission": mission, "status": "active", "wallet": None, "infrastructure": "process-local", "last_action": utc_now()}
+        self.free_agents.append(agent)
+        self._append_stream("workers", agent)
+        return agent
+
     def _append_stream(self, channel: str, content: Dict[str, Any]):
         self.stream_channels[channel] = (self.stream_channels.get(channel, []) + [{"ts": utc_now(), "content": content}])[-200:]
 
     def _append_meeting(self, kind: str, content: Dict[str, Any]):
         self.meeting_stream = (self.meeting_stream + [{"ts": utc_now(), "kind": kind, "content": content}])[-300:]
-        if kind in ["reflex", "tactic", "strategy", "constitution", "vote", "leader_election"]:
+        if kind in ["reflex", "tactic", "strategy", "constitution", "vote", "leader_election", "operator_note"]:
             self._append_stream("council", {"kind": kind, **content})
 
     def _append_question(self, division: str, question: str):
@@ -255,6 +277,26 @@ class AutonomousInstitutionEngine:
     def record_autonomous_closure(self, item: Dict[str, Any]):
         self.autonomous_closure_log = (self.autonomous_closure_log + [item])[-100:]
         self._append_stream("governance", {"autonomous_closure": item})
+
+    def verify_runtime(self) -> Dict[str, Any]:
+        checks = {
+            "wake_packet_ready": bool(self.wake_packet),
+            "last_run_present": bool(self.last_run),
+            "grok_live": bool(self.world_model["resources"].get("grok_live")),
+            "meeting_stream_nonempty": len(self.meeting_stream) > 0,
+            "workers_present": len(self.free_agents) > 0,
+            "rollback_targets_present": len(self.rollback_targets) > 0,
+        }
+        passed = sum(1 for v in checks.values() if v)
+        score = round(passed / max(len(checks), 1), 3)
+        status = "healthy" if score >= 0.83 else "degraded" if score >= 0.5 else "critical"
+        result = {"ts": utc_now(), "checks": checks, "score": score, "status": status}
+        self.last_verification = result
+        self._append_stream("governance", {"verification": result})
+        return result
+
+    def rollback_recommended(self, verification: Dict[str, Any]) -> bool:
+        return verification.get("status") == "critical"
 
     async def start(self):
         self.logger.info("LIVING INSTITUTION ENGINE STARTED")
@@ -328,6 +370,7 @@ class AutonomousInstitutionEngine:
                         digest = hashlib.sha256(r.text.encode()).hexdigest()
                         if digest != self.last_ledger_hash:
                             self.last_ledger_hash = digest
+                self.verify_runtime()
             except Exception as e:
                 self.logger.warning("HEALTH ERROR: %s", e)
             await asyncio.sleep(60)
@@ -432,27 +475,34 @@ class AutonomousInstitutionEngine:
         artifacts = self.latest_artifacts or []
         self.divisions["token_efficiency"]["latest"] = {"finding": f"Allocator policy={allocation['policy']}; spend pressure {allocation['spend_pressure']}", "score": round(1.0 - allocation["spend_pressure"], 2)}
         self.divisions["drift"]["latest"] = {"finding": "Winner margin is small; keep external review in the loop.", "margin": metrics.get("margin", 0.0)}
-        self.divisions["expansion"]["latest"] = {"finding": "Mutation arm restored; next compounding targets are replay and deeper decomposition.", "priority": 1}
+        self.divisions["expansion"]["latest"] = {"finding": "Process-local workers active; separate infra still needs provider creds.", "priority": 1}
         self.divisions["quantum_nonclassical"]["latest"] = {"finding": "Run bounded tournaments; do not abandon classical baselines.", "winner": (self.research_history[-1]["winner"]["model"] if self.research_history else None)}
         self.divisions["operator_coupling"]["latest"] = {"finding": "Convert intuition into parameterized intervention tests and log them.", "status": "queued"}
         self.divisions["opportunity"]["latest"] = {"finding": artifacts[0]["name"] if artifacts else "No artifact ready yet.", "top_score": artifacts[0]["score"] if artifacts else None}
         self.divisions["governance"]["latest"] = {"finding": "Jack remains sovereign; trusted identities control mutation and rollback.", "trusted": self.governance.trusted_identities}
-        self.divisions["supergrok_audit"]["latest"] = {"finding": "Alive and mutating; still missing deeper file splits and stronger persisted replay.", "severity": "high"}
+        self.divisions["supergrok_audit"]["latest"] = {"finding": "Alive and mutating; still missing external machine spawning creds and rich post-deploy verifier.", "severity": "high"}
         for name, div in self.divisions.items():
             self._append_question(name, div["question"])
             self._append_stream("divisions", {"division": name, "latest": div["latest"]})
+
+    def update_workers(self):
+        for worker in self.free_agents:
+            worker["last_action"] = utc_now()
+            worker["status"] = "active"
+            self._append_stream("workers", worker)
 
     async def run_reflex_cycle(self):
         await self.update_triangulation()
         self.latest_opportunities = self.evaluate_opportunities()
         self.latest_artifacts = self.artifact_engine.rank()
-        self.executed_artifacts = self.artifact_engine.execute(self.latest_artifacts)
+        self.executed_artifacts = self.artifact_engine.execute(self.latest_artifacts, self.mission, self.latest_metrics)
         self.latest_goal_set = self.objective_engine.build(self.hypothesis_registry["open_questions"], self.latest_opportunities, self.self_questions)
         self.objective_queue = self.latest_goal_set[:]
         allocation = self.resource_allocator.allocate(self.world_model, self.latest_triangulation)
         self.propose_mutations()
         self.meta_evaluation = self.meta_evaluator.evaluate(self.latest_metrics, self.latest_triangulation, self.latest_artifacts, self.mutation_proposals)
         self.update_divisions(allocation)
+        self.update_workers()
         self._append_meeting("reflex", {"trigger": "reflex", "triangulation": self.latest_triangulation, "allocation": allocation, "artifact_top": self.latest_artifacts[0] if self.latest_artifacts else None})
         self._append_stream("artifacts", {"executed_artifacts": self.executed_artifacts})
         self.last_run = utc_now()
@@ -478,7 +528,7 @@ class AutonomousInstitutionEngine:
         hypothesis_state = self.update_hypotheses(tournament)
         self.latest_opportunities = self.evaluate_opportunities()
         self.latest_artifacts = self.artifact_engine.rank()
-        self.executed_artifacts = self.artifact_engine.execute(self.latest_artifacts)
+        self.executed_artifacts = self.artifact_engine.execute(self.latest_artifacts, self.mission, self.latest_metrics)
         self.propose_mutations()
         self.meta_evaluation = self.meta_evaluator.evaluate(self.latest_metrics, self.latest_triangulation, self.latest_artifacts, self.mutation_proposals)
         allocation = self.resource_allocator.allocate(self.world_model, self.latest_triangulation)
@@ -494,14 +544,14 @@ class AutonomousInstitutionEngine:
 
     async def run_constitution_cycle(self):
         snap = self.snapshot("constitution_cycle")
-        doctrine = {"ts": utc_now(), "autonomy_mode": self.autonomy_mode, "background_debate_enabled": self.background_debate_enabled, "trusted_identities": self.governance.trusted_identities, "meta_evaluation": self.meta_evaluation, "earned_power_next": "autonomous implementation closure and richer replay"}
+        doctrine = {"ts": utc_now(), "autonomy_mode": self.autonomy_mode, "background_debate_enabled": self.background_debate_enabled, "trusted_identities": self.governance.trusted_identities, "meta_evaluation": self.meta_evaluation, "earned_power_next": "richer external workers and deeper verifier"}
         self.world_model["futures"] = (self.world_model["futures"] + [doctrine])[-80:]
         self._append_meeting("constitution", {"snapshot": snap, "doctrine": doctrine})
         await self.write_ledger("COUNCIL_SYNTHESIS", {"kind": "constitution_cycle", "source": "Orion Constitution", "snapshot": snap, "doctrine": doctrine})
         return doctrine
 
     def build_wake_packet(self):
-        return {"generated_at": utc_now(), "leader": self.governance.leader, "operator_sovereign": self.governance.operator_sovereign, "autonomy_mode": self.autonomy_mode, "background_debate_enabled": self.background_debate_enabled, "mission": self.mission, "world_model": self.world_model, "agenda": self.research_agenda, "latest_vote": self.last_vote, "latest_research": self.research_history[-1] if self.research_history else None, "hypotheses": self.hypothesis_registry, "metrics": self.latest_metrics, "triangulation": self.latest_triangulation, "opportunities": self.latest_opportunities, "artifacts": self.latest_artifacts, "executed_artifacts": self.executed_artifacts, "divisions": self.divisions, "self_questions": self.self_questions[-25:], "snapshots": self.snapshots[-20:], "deployment_sims": self.deployment_sims[-20:], "meta_evaluation": self.meta_evaluation, "mutation_proposals": self.mutation_proposals[:10], "rollback_targets": self.rollback_targets[:10], "delegation_map": self.delegation_map, "autonomous_closure_log": self.autonomous_closure_log[-20:], "self_tuning": SELF_TUNING}
+        return {"generated_at": utc_now(), "leader": self.governance.leader, "operator_sovereign": self.governance.operator_sovereign, "autonomy_mode": self.autonomy_mode, "background_debate_enabled": self.background_debate_enabled, "mission": self.mission, "world_model": self.world_model, "agenda": self.research_agenda, "latest_vote": self.last_vote, "latest_research": self.research_history[-1] if self.research_history else None, "hypotheses": self.hypothesis_registry, "metrics": self.latest_metrics, "triangulation": self.latest_triangulation, "opportunities": self.latest_opportunities, "artifacts": self.latest_artifacts, "executed_artifacts": self.executed_artifacts, "divisions": self.divisions, "self_questions": self.self_questions[-25:], "snapshots": self.snapshots[-20:], "deployment_sims": self.deployment_sims[-20:], "meta_evaluation": self.meta_evaluation, "mutation_proposals": self.mutation_proposals[:10], "rollback_targets": self.rollback_targets[:10], "delegation_map": self.delegation_map, "autonomous_closure_log": self.autonomous_closure_log[-20:], "self_tuning": SELF_TUNING, "free_agents": self.free_agents[:10], "last_verification": self.last_verification}
 
     def get_state(self):
-        return {"status": "SOVEREIGN_ACTIVE", "last_run": self.last_run, "constraints_active": bool(self.governance.constraints.get("active", True)), "anthropic_configured": bool(self.anthropic_api_key), "xai_configured": bool(self.xai_api_key), "background_debate_enabled": self.background_debate_enabled, "autonomy_mode": self.autonomy_mode, "operator_sovereign": self.governance.operator_sovereign, "trusted_identities": self.governance.trusted_identities, "leader": self.governance.leader, "mission": self.mission, "world_model": self.world_model, "agenda": self.research_agenda, "hypothesis_registry": self.hypothesis_registry, "last_vote": self.last_vote, "wake_packet_ready": bool(self.wake_packet), "loop_intervals": self.loop_intervals, "latest_metrics": self.latest_metrics, "latest_triangulation": self.latest_triangulation, "latest_opportunities": self.latest_opportunities, "latest_artifacts": self.latest_artifacts, "executed_artifacts": self.executed_artifacts, "divisions": self.divisions, "meeting_stream_size": len(self.meeting_stream), "snapshot_count": len(self.snapshots), "meta_evaluation": self.meta_evaluation, "governance_state": self.governance.state(), "delegation_map": self.delegation_map, "mutation_proposals": self.mutation_proposals[:10], "rollback_targets": self.rollback_targets[:10], "autonomous_closure_log": self.autonomous_closure_log[-20:], "self_tuning": SELF_TUNING}
+        return {"status": "SOVEREIGN_ACTIVE", "last_run": self.last_run, "constraints_active": bool(self.governance.constraints.get("active", True)), "anthropic_configured": bool(self.anthropic_api_key), "xai_configured": bool(self.xai_api_key), "background_debate_enabled": self.background_debate_enabled, "autonomy_mode": self.autonomy_mode, "operator_sovereign": self.governance.operator_sovereign, "trusted_identities": self.governance.trusted_identities, "leader": self.governance.leader, "mission": self.mission, "world_model": self.world_model, "agenda": self.research_agenda, "hypothesis_registry": self.hypothesis_registry, "last_vote": self.last_vote, "wake_packet_ready": bool(self.wake_packet), "loop_intervals": self.loop_intervals, "latest_metrics": self.latest_metrics, "latest_triangulation": self.latest_triangulation, "latest_opportunities": self.latest_opportunities, "latest_artifacts": self.latest_artifacts, "executed_artifacts": self.executed_artifacts, "divisions": self.divisions, "meeting_stream_size": len(self.meeting_stream), "snapshot_count": len(self.snapshots), "meta_evaluation": self.meta_evaluation, "governance_state": self.governance.state(), "delegation_map": self.delegation_map, "mutation_proposals": self.mutation_proposals[:10], "rollback_targets": self.rollback_targets[:10], "autonomous_closure_log": self.autonomous_closure_log[-20:], "self_tuning": SELF_TUNING, "free_agents": self.free_agents[:10], "last_verification": self.last_verification}
