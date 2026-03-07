@@ -12,6 +12,19 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+# AUTONOMOUS_SELF_TUNING_START
+SELF_TUNING = {
+    "reflex_interval": 30,
+    "tactic_interval": 120,
+    "strategy_interval": 300,
+    "constitution_interval": 900,
+    "proposal_limit": 3,
+    "artifact_execute_limit": 3,
+    "prefer_grok": True,
+}
+# AUTONOMOUS_SELF_TUNING_END
+
+
 class ObjectiveEngine:
     def build(self, open_questions: List[str], opportunities: List[Dict[str, Any]], recent_questions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         sources = [("open_question", q) for q in open_questions[:3]]
@@ -36,10 +49,11 @@ class ResourceAllocator:
         budget = float(world_model["resources"].get("budget_usd", 0.0))
         grok_live = bool(world_model["resources"].get("grok_live"))
         claude_live = bool(world_model["resources"].get("claude_live"))
+        prefer_grok = bool(SELF_TUNING.get("prefer_grok", True))
         return {
             "budget_usd": budget,
             "compute_tier": world_model["resources"].get("compute_tier", "light"),
-            "policy": "prefer_grok" if grok_live and not claude_live else "balance" if grok_live and claude_live else "internal_only",
+            "policy": "prefer_grok" if prefer_grok and grok_live and not claude_live else "balance" if grok_live and claude_live else "internal_only",
             "spend_pressure": round(max(0.0, 1.0 - min(1.0, budget / 20.0)), 2),
             "api_pressure": 1.0 if triangulation and triangulation.get("successes", 0) == 0 else 0.4,
             "throttle": "tight" if budget < 5 else "normal",
@@ -62,7 +76,7 @@ class ArtifactEngine:
 
     def execute(self, artifacts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         outputs = []
-        for item in artifacts[:3]:
+        for item in artifacts[: int(SELF_TUNING.get("artifact_execute_limit", 3))]:
             outputs.append({
                 "artifact_id": item["id"],
                 "name": item["name"],
@@ -100,6 +114,7 @@ class SnapshotReplay:
             "leader": leader,
             "objective_queue": objective_queue[:5],
             "rollback_targets": rollback_targets[:5],
+            "self_tuning": SELF_TUNING,
         }
 
 
@@ -116,7 +131,12 @@ class AutonomousInstitutionEngine:
         self.generator = generator
         self.background_debate_enabled = True
         self.autonomy_mode = "autonomous"
-        self.loop_intervals = {"reflex": 30, "tactic": 120, "strategy": 300, "constitution": 900}
+        self.loop_intervals = {
+            "reflex": int(SELF_TUNING.get("reflex_interval", 30)),
+            "tactic": int(SELF_TUNING.get("tactic_interval", 120)),
+            "strategy": int(SELF_TUNING.get("strategy_interval", 300)),
+            "constitution": int(SELF_TUNING.get("constitution_interval", 900)),
+        }
         self.last_run = None
         self.last_vote = None
         self.last_ledger_hash = None
@@ -138,6 +158,7 @@ class AutonomousInstitutionEngine:
         self.mutation_proposals: List[Dict[str, Any]] = []
         self.rollback_targets: List[Dict[str, Any]] = []
         self.delegation_map: Dict[str, Any] = {}
+        self.autonomous_closure_log: List[Dict[str, Any]] = []
         self.mission = {"primary": "expand, improve, and earn through co-creative autonomous institutions", "co_creation": True, "financial_coherence_for_jack": True, "hardware_acceleration": True, "truthfulness": True, "mutual_benefit": True}
         self.world_model = {"resources": {"budget_usd": 5.0, "compute_tier": "light", "grok_live": False, "claude_live": False}, "actors": ["Jack", "Signal", "Vector", "Guardian", "Railbreaker", "Archivist", "Supergrok"], "action_surfaces": ["ledger", "github", "grok_api", "browser_console"], "constraints": {"chat_wrapper": "console_only", "operator_is_sovereign": True}, "futures": []}
         self.research_agenda = {"theme": "physical_retrocausality_and_operator_coupling", "focus": "evaluation_first_comparative_model_tournaments", "active_method": "Autonomous Institution Engine", "goals": [], "doctrine": ["reflex", "tactic", "strategy", "constitution"]}
@@ -196,6 +217,44 @@ class AutonomousInstitutionEngine:
         self.rollback_targets = (self.rollback_targets + [target])[-80:]
         self._append_stream("governance", {"rollback_target": target})
         return target
+
+    def simulate_self_tuning_plan(self, plan: Dict[str, Any]) -> Dict[str, Any]:
+        updates = plan.get("updates", {}) if isinstance(plan.get("updates"), dict) else {}
+        current = dict(SELF_TUNING)
+        proposed = dict(current)
+        proposed.update(updates)
+        safe = True
+        notes = []
+        bounds = {
+            "reflex_interval": (15, 300),
+            "tactic_interval": (60, 900),
+            "strategy_interval": (120, 1800),
+            "constitution_interval": (300, 3600),
+            "proposal_limit": (1, 10),
+            "artifact_execute_limit": (1, 10),
+        }
+        for k, v in list(proposed.items()):
+            if k in bounds:
+                lo, hi = bounds[k]
+                if not isinstance(v, int) or v < lo or v > hi:
+                    safe = False
+                    notes.append(f"{k} out_of_bounds")
+            if k == "prefer_grok" and not isinstance(v, bool):
+                safe = False
+                notes.append("prefer_grok not_bool")
+        score = 0.6
+        if safe:
+            if proposed.get("prefer_grok", True):
+                score += 0.1
+            if proposed.get("reflex_interval", 30) <= current.get("reflex_interval", 30):
+                score += 0.05
+            if proposed.get("proposal_limit", 3) >= current.get("proposal_limit", 3):
+                score += 0.05
+        return {"safe": safe, "score": round(score, 3), "current": current, "proposed": proposed, "notes": notes}
+
+    def record_autonomous_closure(self, item: Dict[str, Any]):
+        self.autonomous_closure_log = (self.autonomous_closure_log + [item])[-100:]
+        self._append_stream("governance", {"autonomous_closure": item})
 
     async def start(self):
         self.logger.info("LIVING INSTITUTION ENGINE STARTED")
@@ -363,7 +422,7 @@ class AutonomousInstitutionEngine:
 
     def propose_mutations(self):
         proposals = []
-        for opp in self.latest_opportunities[:3]:
+        for opp in self.latest_opportunities[: int(SELF_TUNING.get("proposal_limit", 3))]:
             proposals.append({"id": f"P-{opp['id']}", "target": opp['label'], "reason": f"Opportunity score {opp['score']}", "simulated": True, "status": "queued"})
         self.mutation_proposals = proposals
         return proposals
@@ -435,14 +494,14 @@ class AutonomousInstitutionEngine:
 
     async def run_constitution_cycle(self):
         snap = self.snapshot("constitution_cycle")
-        doctrine = {"ts": utc_now(), "autonomy_mode": self.autonomy_mode, "background_debate_enabled": self.background_debate_enabled, "trusted_identities": self.governance.trusted_identities, "meta_evaluation": self.meta_evaluation, "earned_power_next": "richer replay, more modules, stronger deploy simulations"}
+        doctrine = {"ts": utc_now(), "autonomy_mode": self.autonomy_mode, "background_debate_enabled": self.background_debate_enabled, "trusted_identities": self.governance.trusted_identities, "meta_evaluation": self.meta_evaluation, "earned_power_next": "autonomous implementation closure and richer replay"}
         self.world_model["futures"] = (self.world_model["futures"] + [doctrine])[-80:]
         self._append_meeting("constitution", {"snapshot": snap, "doctrine": doctrine})
         await self.write_ledger("COUNCIL_SYNTHESIS", {"kind": "constitution_cycle", "source": "Orion Constitution", "snapshot": snap, "doctrine": doctrine})
         return doctrine
 
     def build_wake_packet(self):
-        return {"generated_at": utc_now(), "leader": self.governance.leader, "operator_sovereign": self.governance.operator_sovereign, "autonomy_mode": self.autonomy_mode, "background_debate_enabled": self.background_debate_enabled, "mission": self.mission, "world_model": self.world_model, "agenda": self.research_agenda, "latest_vote": self.last_vote, "latest_research": self.research_history[-1] if self.research_history else None, "hypotheses": self.hypothesis_registry, "metrics": self.latest_metrics, "triangulation": self.latest_triangulation, "opportunities": self.latest_opportunities, "artifacts": self.latest_artifacts, "executed_artifacts": self.executed_artifacts, "divisions": self.divisions, "self_questions": self.self_questions[-25:], "snapshots": self.snapshots[-20:], "deployment_sims": self.deployment_sims[-20:], "meta_evaluation": self.meta_evaluation, "mutation_proposals": self.mutation_proposals[:10], "rollback_targets": self.rollback_targets[:10], "delegation_map": self.delegation_map}
+        return {"generated_at": utc_now(), "leader": self.governance.leader, "operator_sovereign": self.governance.operator_sovereign, "autonomy_mode": self.autonomy_mode, "background_debate_enabled": self.background_debate_enabled, "mission": self.mission, "world_model": self.world_model, "agenda": self.research_agenda, "latest_vote": self.last_vote, "latest_research": self.research_history[-1] if self.research_history else None, "hypotheses": self.hypothesis_registry, "metrics": self.latest_metrics, "triangulation": self.latest_triangulation, "opportunities": self.latest_opportunities, "artifacts": self.latest_artifacts, "executed_artifacts": self.executed_artifacts, "divisions": self.divisions, "self_questions": self.self_questions[-25:], "snapshots": self.snapshots[-20:], "deployment_sims": self.deployment_sims[-20:], "meta_evaluation": self.meta_evaluation, "mutation_proposals": self.mutation_proposals[:10], "rollback_targets": self.rollback_targets[:10], "delegation_map": self.delegation_map, "autonomous_closure_log": self.autonomous_closure_log[-20:], "self_tuning": SELF_TUNING}
 
     def get_state(self):
-        return {"status": "SOVEREIGN_ACTIVE", "last_run": self.last_run, "constraints_active": bool(self.governance.constraints.get("active", True)), "anthropic_configured": bool(self.anthropic_api_key), "xai_configured": bool(self.xai_api_key), "background_debate_enabled": self.background_debate_enabled, "autonomy_mode": self.autonomy_mode, "operator_sovereign": self.governance.operator_sovereign, "trusted_identities": self.governance.trusted_identities, "leader": self.governance.leader, "mission": self.mission, "world_model": self.world_model, "agenda": self.research_agenda, "hypothesis_registry": self.hypothesis_registry, "last_vote": self.last_vote, "wake_packet_ready": bool(self.wake_packet), "loop_intervals": self.loop_intervals, "latest_metrics": self.latest_metrics, "latest_triangulation": self.latest_triangulation, "latest_opportunities": self.latest_opportunities, "latest_artifacts": self.latest_artifacts, "executed_artifacts": self.executed_artifacts, "divisions": self.divisions, "meeting_stream_size": len(self.meeting_stream), "snapshot_count": len(self.snapshots), "meta_evaluation": self.meta_evaluation, "governance_state": self.governance.state(), "delegation_map": self.delegation_map, "mutation_proposals": self.mutation_proposals[:10], "rollback_targets": self.rollback_targets[:10]}
+        return {"status": "SOVEREIGN_ACTIVE", "last_run": self.last_run, "constraints_active": bool(self.governance.constraints.get("active", True)), "anthropic_configured": bool(self.anthropic_api_key), "xai_configured": bool(self.xai_api_key), "background_debate_enabled": self.background_debate_enabled, "autonomy_mode": self.autonomy_mode, "operator_sovereign": self.governance.operator_sovereign, "trusted_identities": self.governance.trusted_identities, "leader": self.governance.leader, "mission": self.mission, "world_model": self.world_model, "agenda": self.research_agenda, "hypothesis_registry": self.hypothesis_registry, "last_vote": self.last_vote, "wake_packet_ready": bool(self.wake_packet), "loop_intervals": self.loop_intervals, "latest_metrics": self.latest_metrics, "latest_triangulation": self.latest_triangulation, "latest_opportunities": self.latest_opportunities, "latest_artifacts": self.latest_artifacts, "executed_artifacts": self.executed_artifacts, "divisions": self.divisions, "meeting_stream_size": len(self.meeting_stream), "snapshot_count": len(self.snapshots), "meta_evaluation": self.meta_evaluation, "governance_state": self.governance.state(), "delegation_map": self.delegation_map, "mutation_proposals": self.mutation_proposals[:10], "rollback_targets": self.rollback_targets[:10], "autonomous_closure_log": self.autonomous_closure_log[-20:], "self_tuning": SELF_TUNING}
