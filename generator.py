@@ -18,11 +18,10 @@ class SeedGenerator:
         hypotheses = context.get("hypotheses", {})
         world_model = context.get("world_model", {})
         mode = context.get("mode", "autonomous")
-        objectives = context.get("objectives", [])
         return (
-            "You are an external cognition thread for FARL, a persistent autonomous institution. "
-            f"Mode: {mode}. Agenda: {agenda}. Objectives: {objectives}. Hypotheses: {hypotheses}. World-model: {world_model}. "
-            "Respond in short structured prose with: stance, risk, next_move, and one dissent if appropriate."
+            "You are an external cognition thread for FARL. Return JSON-like prose with four keys: stance, risk, next_move, dissent. "
+            f"Mode={mode}. Agenda={agenda}. Hypotheses={hypotheses}. WorldModel={world_model}. "
+            "Be concise but substantive."
         )
 
     async def _probe_xai(self, prompt: str) -> Dict[str, Any]:
@@ -42,7 +41,7 @@ class SeedGenerator:
                 return {"source": "Grok-Ensemble", "data": {"error": data, "model": self.xai_model}}
             choices = data.get("choices", [])
             text = choices[0].get("message", {}).get("content", "") if choices and isinstance(choices[0], dict) else ""
-            return {"source": "Grok-Ensemble", "data": {"text": text[:3500], "model": data.get("model", self.xai_model)}}
+            return {"source": "Grok-Ensemble", "data": {"text": text[:3200], "model": data.get("model", self.xai_model)}}
         except Exception as e:
             return {"source": "Grok-Ensemble", "data": {"error": str(e), "model": self.xai_model}}
 
@@ -65,7 +64,7 @@ class SeedGenerator:
             if not r.ok:
                 return {"source": "Claude-Ensemble", "data": {"error": data, "model": self.anthropic_model}}
             text = "".join(block.get("text", "") for block in data.get("content", []) if isinstance(block, dict))
-            return {"source": "Claude-Ensemble", "data": {"text": text[:3500], "model": data.get("model", self.anthropic_model)}}
+            return {"source": "Claude-Ensemble", "data": {"text": text[:3200], "model": data.get("model", self.anthropic_model)}}
         except Exception as e:
             return {"source": "Claude-Ensemble", "data": {"error": str(e), "model": self.anthropic_model}}
 
