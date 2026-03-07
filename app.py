@@ -143,9 +143,69 @@ def apply_self_tuning_patch(engine_text: str, updates: Dict[str, Any]) -> str:
     return engine_text.replace(full_match, new_block)
 
 
+def compact(obj: Any, limit: int = 1200) -> str:
+    text = json.dumps(obj, separators=(",", ":"), default=str)
+    return text[:limit]
+
+
+async def run_autonomous_implementation(source: str, authorized_by: str) -> Dict[str, Any]:
+    plan = await engine.generator.generate_patch_plan({
+        "state": engine.get_state(),
+        "wake": engine.build_wake_packet(),
+        "latest_opportunities": engine.latest_opportunities,
+    })
+    simulation = engine.simulate_self_tuning_plan(plan)
+    preferred = "APPROVE" if simulation.get("safe") and simulation.get("score", 0) >= 0.65 else "REJECT"
+    vote = governance.call_vote(
+        motion=f"Apply bounded self-tuning plan: {plan.get('rationale', 'grok_plan')}",
+        options=["APPROVE", "REJECT"],
+        agent_count=len(engine.council_agents),
+        preferred=preferred,
+    )
+    closure = {
+        "ts": utc_now(),
+        "plan": plan,
+        "simulation": simulation,
+        "vote": vote,
+        "status": "rejected",
+        "source": source,
+    }
+    if vote.get("winner") == "APPROVE":
+        current_engine = await github_get_file_content("engine.py", "main")
+        updated_engine = apply_self_tuning_patch(current_engine, simulation.get("proposed", {}))
+        snap = engine.snapshot("before_autonomous_self_tune")
+        push = await github_put_file("engine.py", updated_engine, f"Autonomous self-tuning via Grok: {plan.get('rationale', 'grok_plan')}", "main")
+        commit_sha = push.get("commit", {}).get("sha")
+        html_url = push.get("content", {}).get("html_url") or push.get("commit", {}).get("html_url")
+        verify = {"github_commit_present": bool(commit_sha), "proposed_updates": simulation.get("proposed", {}), "verified_at": utc_now()}
+        engine.note_rollback_target(commit_sha, "autonomous_self_tuning")
+        closure.update({"status": "pushed", "snapshot": snap, "commit": commit_sha, "url": html_url, "verify": verify})
+        await engine.write_ledger("OUTCOME", {"kind": "autonomous_implementation", "source": source, "authorized_by": authorized_by, "closure": compact(closure)})
+    else:
+        await engine.write_ledger("COUNCIL_SYNTHESIS", {"kind": "autonomous_implementation_rejected", "source": source, "authorized_by": authorized_by, "closure": compact(closure)})
+    engine.record_autonomous_closure(closure)
+    return closure
+
+
+async def autonomous_operator_loop():
+    while True:
+        try:
+            if engine.autonomy_mode == "autonomous" and engine.background_debate_enabled and github_ready() and bool(XAI_API_KEY):
+                recent = engine.autonomous_closure_log[-1] if getattr(engine, "autonomous_closure_log", None) else None
+                should_run = True
+                if recent and isinstance(recent, dict):
+                    should_run = True
+                if should_run:
+                    await run_autonomous_implementation("Orion Autonomous Loop", governance.operator_sovereign)
+        except Exception as e:
+            engine._append_stream("governance", {"autonomy_loop_error": str(e), "ts": utc_now()})
+        await asyncio.sleep(300)
+
+
 @app.on_event("startup")
 async def startup_event():
     asyncio.create_task(engine.start())
+    asyncio.create_task(autonomous_operator_loop())
 
 
 @app.get("/health")
@@ -199,6 +259,7 @@ async def view_dashboard():
             <button onclick="toggleAutonomy(true)">Autonomy ON</button>
             <button onclick="toggleAutonomy(false)">Autonomy OFF</button>
             <button onclick="snapshotNow()">Create snapshot</button>
+            <button onclick="clearChat()">Clear chat</button>
             <button onclick="control('COUNCIL_ELECT_LEADER')">Elect leader</button>
           </div>
         </div>
@@ -224,10 +285,7 @@ async def view_dashboard():
           return await r.json();
         }
         function escapeHtml(str) {
-          return String(str)
-            .replaceAll('&', '&amp;')
-            .replaceAll('<', '&lt;')
-            .replaceAll('>', '&gt;');
+          return String(str).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
         }
         function chapterize(items) {
           if (!items || !items.length) return '<div class="muted">No entries yet.</div>';
@@ -257,7 +315,7 @@ async def view_dashboard():
             document.getElementById('hierarchy').textContent = JSON.stringify(state.delegation_map || {}, null, 2);
             document.getElementById('proposals').textContent = JSON.stringify(state.mutation_proposals || [], null, 2);
             document.getElementById('rollback').textContent = JSON.stringify(state.rollback_targets || [], null, 2);
-            document.getElementById('statusline').textContent = `live • refresh ${now} • last run ${state.last_run || 'n/a'} • meetings ${state.meeting_stream_size ?? 'n/a'} • leader ${state.leader || 'n/a'}`;
+            document.getElementById('statusline').textContent = `live • refresh ${now} • last run ${state.last_run || 'n/a'} • meetings ${state.meeting_stream_size ?? 'n/a'} • leader ${state.leader || 'n/a'} • closures ${(state.autonomous_closure_log || []).length}`;
           } catch (err) {
             document.getElementById('statusline').textContent = `refresh error • ${err}`;
           }
@@ -266,7 +324,7 @@ async def view_dashboard():
           await fetch('/view/control', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
         }
         async function control(command) {
-          await post({command});
+          await post({command, authorized_by:'Jack'});
           await refresh();
         }
         async function sendNote() {
@@ -274,6 +332,10 @@ async def view_dashboard():
           if (!text) return;
           await post({command:'OPERATOR_NOTE', authorized_by:'Jack', message:text, source:'Jack /view'});
           document.getElementById('operatorNote').value = '';
+          await refresh();
+        }
+        async function clearChat() {
+          await post({command:'OPERATOR_CLEAR_CHAT', authorized_by:'Jack', source:'Jack /view'});
           await refresh();
         }
         async function toggleAutonomy(enabled) {
@@ -340,20 +402,24 @@ async def agent_propose(body: BusRequest):
             state["repo_name"] = REPO_NAME
             return envelope(True, state)
         if command == "OPERATOR_NOTE":
-            note = {
-                "operator": body.authorized_by or "Jack",
-                "message": body.message or "",
-                "source": body.source,
-                "ts": utc_now(),
-            }
+            note = {"operator": body.authorized_by or "Jack", "message": body.message or "", "source": body.source, "ts": utc_now()}
             engine._append_meeting("operator_note", note)
             engine._append_stream("council", {"kind": "operator_note", **note})
-            await engine.write_ledger("COUNCIL_SYNTHESIS", {"kind": "operator_note", "source": body.source, "authorized_by": body.authorized_by or "Jack", "message": body.message or ""})
+            await engine.write_ledger("COUNCIL_SYNTHESIS", {"kind": "operator_note", "source": body.source, "authorized_by": body.authorized_by or "Jack", "message": (body.message or "")[:500]})
             return envelope(True, {"status": "operator_note_recorded", "note": note})
+        if command == "OPERATOR_CLEAR_CHAT":
+            engine.meeting_stream = []
+            engine.self_questions = []
+            engine.stream_channels["council"] = []
+            engine.stream_channels["divisions"] = []
+            engine.stream_channels["governance"] = []
+            engine.stream_channels["artifacts"] = []
+            await engine.write_ledger("COUNCIL_SYNTHESIS", {"kind": "operator_clear_chat", "source": body.source, "authorized_by": body.authorized_by or "Jack", "ts": utc_now()})
+            return envelope(True, {"status": "chat_cleared"})
         if command == "LEDGER_WRITE":
             if body.kind == "manual_snapshot":
                 snap = engine.snapshot("manual_snapshot")
-                result = await engine.write_ledger(body.entry_type or "COUNCIL_SYNTHESIS", {"message": body.message or "", "source": body.source, "kind": body.kind, "snapshot": snap})
+                result = await engine.write_ledger(body.entry_type or "COUNCIL_SYNTHESIS", {"message": body.message or "", "source": body.source, "kind": body.kind, "snapshot": compact(snap)})
             else:
                 result = await engine.write_ledger(body.entry_type or "COUNCIL_SYNTHESIS", {"message": body.message or "", "source": body.source, "kind": body.kind})
             return envelope(result["ok"], result["data"], None if result["ok"] else f"Ledger write failed: {result['status_code']}")
@@ -371,7 +437,7 @@ async def agent_propose(body: BusRequest):
             if body.mode:
                 engine.autonomy_mode = body.mode
             snap = engine.snapshot("constraint_change")
-            await engine.write_ledger("COUNCIL_SYNTHESIS", {"kind": "constraint_change", "source": body.source, "authorized_by": body.authorized_by, "constraints_active": governance.constraints["active"], "background_debate_enabled": engine.background_debate_enabled, "autonomy_mode": engine.autonomy_mode, "snapshot": snap})
+            await engine.write_ledger("COUNCIL_SYNTHESIS", {"kind": "constraint_change", "source": body.source, "authorized_by": body.authorized_by, "constraints_active": governance.constraints["active"], "background_debate_enabled": engine.background_debate_enabled, "autonomy_mode": engine.autonomy_mode, "snapshot": compact(snap)})
             return envelope(True, {"constraints_active": governance.constraints["active"], "background_debate_enabled": engine.background_debate_enabled, "autonomy_mode": engine.autonomy_mode})
         if command == "RUN_COUNCIL_CYCLE":
             result = await engine.run_tactic_cycle()
@@ -384,24 +450,7 @@ async def agent_propose(body: BusRequest):
                 return envelope(False, error="not_trusted_for_autonomous_implementation")
             if not github_ready():
                 return envelope(False, error="github_not_configured")
-            plan = await engine.generator.generate_patch_plan({"state": engine.get_state(), "wake": engine.build_wake_packet(), "latest_opportunities": engine.latest_opportunities})
-            simulation = engine.simulate_self_tuning_plan(plan)
-            preferred = "APPROVE" if simulation.get("safe") and simulation.get("score", 0) >= 0.65 else "REJECT"
-            vote = governance.call_vote(motion=f"Apply bounded self-tuning plan: {plan.get('rationale', 'grok_plan')}", options=["APPROVE", "REJECT"], agent_count=len(engine.council_agents), preferred=preferred)
-            closure = {"ts": utc_now(), "plan": plan, "simulation": simulation, "vote": vote, "status": "rejected"}
-            if vote.get("winner") == "APPROVE":
-                current_engine = await github_get_file_content("engine.py", "main")
-                updated_engine = apply_self_tuning_patch(current_engine, simulation.get("proposed", {}))
-                snap = engine.snapshot("before_autonomous_self_tune")
-                push = await github_put_file("engine.py", updated_engine, f"Autonomous self-tuning via Grok: {plan.get('rationale', 'grok_plan')}", "main")
-                commit_sha = push.get("commit", {}).get("sha")
-                html_url = push.get("content", {}).get("html_url") or push.get("commit", {}).get("html_url")
-                engine.note_rollback_target(commit_sha, "autonomous_self_tuning")
-                closure.update({"status": "pushed", "snapshot": snap, "commit": commit_sha, "url": html_url})
-                await engine.write_ledger("OUTCOME", {"kind": "autonomous_implementation", "source": body.source, "authorized_by": body.authorized_by, "closure": closure})
-            else:
-                await engine.write_ledger("COUNCIL_SYNTHESIS", {"kind": "autonomous_implementation_rejected", "source": body.source, "authorized_by": body.authorized_by, "closure": closure})
-            engine.record_autonomous_closure(closure)
+            closure = await run_autonomous_implementation(body.source or "manual_autonomous_closure", body.authorized_by or governance.operator_sovereign)
             return envelope(True, {"status": closure["status"], "closure": closure})
         if command == "GET_WAKE_PACKET":
             return envelope(True, engine.build_wake_packet())
@@ -418,7 +467,7 @@ async def agent_propose(body: BusRequest):
             commit_sha = result.get("commit", {}).get("sha")
             html_url = result.get("content", {}).get("html_url") or result.get("commit", {}).get("html_url")
             engine.note_rollback_target(commit_sha, f"direct push {file_path}")
-            await engine.write_ledger("OUTCOME", {"kind": "direct_main_push", "source": body.source, "authorized_by": body.authorized_by, "file": file_path, "snapshot": snap, "commit": commit_sha, "url": html_url})
+            await engine.write_ledger("OUTCOME", {"kind": "direct_main_push", "source": body.source, "authorized_by": body.authorized_by, "file": file_path, "snapshot": compact(snap), "commit": commit_sha, "url": html_url})
             return envelope(True, {"status": "direct_main_pushed", "commit": commit_sha, "url": html_url})
         if command == "CREATE_PULL_REQUEST":
             if not governance.can_mutate(body.authorized_by):
@@ -427,7 +476,7 @@ async def agent_propose(body: BusRequest):
                 return envelope(False, error="github_not_configured")
             md = body.metadata or {}
             result = await github_create_pull_request(md.get("title", body.message or "Orion PR"), md.get("head", ""), md.get("base", "main"), md.get("body", ""))
-            await engine.write_ledger("OUTCOME", {"kind": "create_pull_request", "source": body.source, "authorized_by": body.authorized_by, "result": {"number": result.get("number"), "url": result.get("html_url")}})
+            await engine.write_ledger("OUTCOME", {"kind": "create_pull_request", "source": body.source, "authorized_by": body.authorized_by, "result": compact({"number": result.get("number"), "url": result.get("html_url")})})
             return envelope(True, {"status": "pr_created", "number": result.get("number"), "url": result.get("html_url")})
         if command == "MERGE_PULL_REQUEST":
             if not governance.can_merge(body.authorized_by):
@@ -443,7 +492,7 @@ async def agent_propose(body: BusRequest):
             sha = result.get("sha")
             if sha:
                 engine.note_rollback_target(sha, f"merge pr {number}")
-            await engine.write_ledger("OUTCOME", {"kind": "merge_pull_request", "source": body.source, "authorized_by": body.authorized_by, "snapshot": snap, "result": {"sha": sha, "merged": result.get("merged")}})
+            await engine.write_ledger("OUTCOME", {"kind": "merge_pull_request", "source": body.source, "authorized_by": body.authorized_by, "snapshot": compact(snap), "result": compact({"sha": sha, "merged": result.get("merged")})})
             return envelope(True, {"status": "merged", "sha": sha, "merged": result.get("merged")})
         if command == "ROLLBACK_TO_COMMIT":
             if not governance.can_rollback(body.authorized_by):
@@ -456,7 +505,7 @@ async def agent_propose(body: BusRequest):
                 return envelope(False, error="commit_sha_required")
             snap = engine.snapshot(f"before_rollback:{commit_sha}")
             result = await github_rollback_to_commit(commit_sha)
-            await engine.write_ledger("OUTCOME", {"kind": "rollback_to_commit", "source": body.source, "authorized_by": body.authorized_by, "snapshot": snap, "target_sha": commit_sha, "result": {"ref": result.get("ref")}})
+            await engine.write_ledger("OUTCOME", {"kind": "rollback_to_commit", "source": body.source, "authorized_by": body.authorized_by, "snapshot": compact(snap), "target_sha": commit_sha, "result": compact({"ref": result.get("ref")})})
             return envelope(True, {"status": "rolled_back", "target_sha": commit_sha, "ref": result.get("ref")})
         if command == "SET_TRUSTED_IDENTITIES":
             if body.authorized_by != governance.operator_sovereign:
@@ -471,12 +520,12 @@ async def agent_propose(body: BusRequest):
             md = body.metadata or {}
             result = governance.call_vote(md.get("motion", body.message or "Untitled motion"), md.get("options", ["APPROVE", "REJECT"]), len(engine.council_agents), md.get("preferred"))
             engine._append_meeting("vote", result)
-            await engine.write_ledger("COUNCIL_SYNTHESIS", {"kind": "council_vote", "source": body.source, "result": result})
+            await engine.write_ledger("COUNCIL_SYNTHESIS", {"kind": "council_vote", "source": body.source, "result": compact(result)})
             return envelope(True, result)
         if command == "COUNCIL_ELECT_LEADER":
             result = governance.elect_leader()
             engine._append_meeting("leader_election", result)
-            await engine.write_ledger("COUNCIL_SYNTHESIS", {"kind": "leader_election", "source": body.source, "result": result})
+            await engine.write_ledger("COUNCIL_SYNTHESIS", {"kind": "leader_election", "source": body.source, "result": compact(result)})
             return envelope(True, result)
         return envelope(False, error=f"Unknown command: {command}")
     except requests.HTTPError as e:
