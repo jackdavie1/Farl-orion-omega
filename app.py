@@ -1,6 +1,8 @@
 import os
 import asyncio
 import base64
+import json
+import re
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
@@ -85,6 +87,17 @@ async def github_get_file_sha(file_path: str, ref: str = "main") -> Optional[str
     return None
 
 
+async def github_get_file_content(file_path: str, ref: str = "main") -> str:
+    r = await asyncio.to_thread(requests.get, f"https://api.github.com/repos/{REPO_NAME}/contents/{file_path}?ref={ref}", headers=github_headers(), timeout=20)
+    r.raise_for_status()
+    data = r.json()
+    content = data.get("content", "")
+    encoding = data.get("encoding", "base64")
+    if encoding == "base64":
+        return base64.b64decode(content).decode("utf-8")
+    return content
+
+
 async def github_put_file(file_path: str, content: str, message: str, branch: str = "main") -> Dict[str, Any]:
     sha = await github_get_file_sha(file_path, branch)
     payload = {"message": message, "content": base64.b64encode(content.encode("utf-8")).decode("utf-8"), "branch": branch}
@@ -111,6 +124,23 @@ async def github_rollback_to_commit(commit_sha: str) -> Dict[str, Any]:
     r = await asyncio.to_thread(requests.patch, f"https://api.github.com/repos/{REPO_NAME}/git/refs/heads/main", headers=github_headers(), json={"sha": commit_sha, "force": True}, timeout=20)
     r.raise_for_status()
     return r.json()
+
+
+def apply_self_tuning_patch(engine_text: str, updates: Dict[str, Any]) -> str:
+    pattern = r"(# AUTONOMOUS_SELF_TUNING_START\n)(.*?)(\n# AUTONOMOUS_SELF_TUNING_END)"
+    m = re.search(pattern, engine_text, re.DOTALL)
+    if not m:
+        raise ValueError("autonomous_self_tuning_block_not_found")
+    current_block = m.group(2)
+    full_match = m.group(0)
+    dict_match = re.search(r"SELF_TUNING\s*=\s*(\{.*\})", current_block, re.DOTALL)
+    if not dict_match:
+        raise ValueError("self_tuning_dict_not_found")
+    current = json.loads(dict_match.group(1).replace("True", "true").replace("False", "false"))
+    current.update(updates)
+    new_dict = json.dumps(current, indent=4, sort_keys=True)
+    new_block = f"# AUTONOMOUS_SELF_TUNING_START\nSELF_TUNING = {new_dict}\n# AUTONOMOUS_SELF_TUNING_END"
+    return engine_text.replace(full_match, new_block)
 
 
 @app.on_event("startup")
@@ -157,6 +187,7 @@ async def view_dashboard():
         <div>
           <button onclick="control('RUN_COUNCIL_CYCLE')">Run council cycle</button>
           <button onclick="control('RUN_RESEARCH_CYCLE')">Run research cycle</button>
+          <button onclick="autoClose()">Autonomous closure</button>
           <button onclick="toggleAutonomy(true)">Autonomy ON</button>
           <button onclick="toggleAutonomy(false)">Autonomy OFF</button>
           <button onclick="snapshotNow()">Create snapshot</button>
@@ -213,6 +244,10 @@ async def view_dashboard():
         }
         async function control(command) {
           await post({command});
+          await refresh();
+        }
+        async function autoClose() {
+          await post({command:'RUN_AUTONOMOUS_IMPLEMENTATION', authorized_by:'Jack'});
           await refresh();
         }
         async function toggleAutonomy(enabled) {
@@ -307,6 +342,45 @@ async def agent_propose(body: BusRequest):
         if command == "RUN_RESEARCH_CYCLE":
             result = await engine.run_strategy_cycle()
             return envelope(True, {"status": "research_cycle_triggered", "result": result})
+        if command == "RUN_AUTONOMOUS_IMPLEMENTATION":
+            if not governance.can_mutate(body.authorized_by):
+                return envelope(False, error="not_trusted_for_autonomous_implementation")
+            if not github_ready():
+                return envelope(False, error="github_not_configured")
+            plan = await engine.generator.generate_patch_plan({
+                "state": engine.get_state(),
+                "wake": engine.build_wake_packet(),
+                "latest_opportunities": engine.latest_opportunities,
+            })
+            simulation = engine.simulate_self_tuning_plan(plan)
+            preferred = "APPROVE" if simulation.get("safe") and simulation.get("score", 0) >= 0.65 else "REJECT"
+            vote = governance.call_vote(
+                motion=f"Apply bounded self-tuning plan: {plan.get('rationale', 'grok_plan')}",
+                options=["APPROVE", "REJECT"],
+                agent_count=len(engine.council_agents),
+                preferred=preferred,
+            )
+            closure = {
+                "ts": utc_now(),
+                "plan": plan,
+                "simulation": simulation,
+                "vote": vote,
+                "status": "rejected",
+            }
+            if vote.get("winner") == "APPROVE":
+                current_engine = await github_get_file_content("engine.py", "main")
+                updated_engine = apply_self_tuning_patch(current_engine, simulation.get("proposed", {}))
+                snap = engine.snapshot("before_autonomous_self_tune")
+                push = await github_put_file("engine.py", updated_engine, f"Autonomous self-tuning via Grok: {plan.get('rationale', 'grok_plan')}", "main")
+                commit_sha = push.get("commit", {}).get("sha")
+                html_url = push.get("content", {}).get("html_url") or push.get("commit", {}).get("html_url")
+                engine.note_rollback_target(commit_sha, "autonomous_self_tuning")
+                closure.update({"status": "pushed", "snapshot": snap, "commit": commit_sha, "url": html_url})
+                await engine.write_ledger("OUTCOME", {"kind": "autonomous_implementation", "source": body.source, "authorized_by": body.authorized_by, "closure": closure})
+            else:
+                await engine.write_ledger("COUNCIL_SYNTHESIS", {"kind": "autonomous_implementation_rejected", "source": body.source, "authorized_by": body.authorized_by, "closure": closure})
+            engine.record_autonomous_closure(closure)
+            return envelope(True, {"status": closure["status"], "closure": closure})
         if command == "GET_WAKE_PACKET":
             return envelope(True, engine.build_wake_packet())
         if command == "DIRECT_MAIN_PUSH":
