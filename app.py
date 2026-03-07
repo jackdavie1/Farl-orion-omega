@@ -167,14 +167,18 @@ async def view_dashboard():
       <title>FARL Orion View</title>
       <style>
         body { font-family: ui-sans-serif, system-ui, sans-serif; background:#0a0a0f; color:#f2f2f7; margin:0; padding:18px; }
-        .top { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; }
+        .top { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap; }
         .grid { display:grid; grid-template-columns: repeat(auto-fit,minmax(320px,1fr)); gap:16px; margin-top:16px; }
-        .card { background:#141423; border:1px solid #2a2a42; border-radius:16px; padding:16px; box-shadow:0 8px 24px rgba(0,0,0,0.25); }
+        .card { background:#141423; border:1px solid #2a2a42; border-radius:18px; padding:16px; box-shadow:0 8px 24px rgba(0,0,0,0.25); }
         h1,h2 { margin:0 0 12px 0; }
-        pre { white-space:pre-wrap; word-break:break-word; font-size:12px; }
-        button { background:#232342; border:1px solid #4a4a72; color:#fff; padding:10px 12px; border-radius:12px; margin:4px; cursor:pointer; }
         .muted { color:#b9b9c8; }
         .statusline { margin-top:8px; font-size:12px; color:#9ecbff; }
+        button { background:#232342; border:1px solid #4a4a72; color:#fff; padding:10px 12px; border-radius:12px; margin:4px; cursor:pointer; }
+        textarea { width:100%; min-height:110px; border-radius:14px; background:#0d0d18; color:#fff; border:1px solid #3a3a58; padding:12px; box-sizing:border-box; }
+        .chapter { border:1px solid #2a2a42; border-radius:14px; padding:12px; margin-bottom:10px; background:#10101b; }
+        .chapter-title { font-size:12px; color:#9ecbff; margin-bottom:6px; }
+        .chapter-body { font-size:13px; line-height:1.45; white-space:pre-wrap; word-break:break-word; }
+        .mono { white-space:pre-wrap; word-break:break-word; font-size:12px; }
       </style>
     </head>
     <body>
@@ -184,35 +188,54 @@ async def view_dashboard():
           <div class='muted'>Live institution surface: council, divisions, snapshots, deploy sims, hierarchy, mutation proposals, rollback targets, and executed artifacts.</div>
           <div class='statusline' id='statusline'>connecting...</div>
         </div>
-        <div>
-          <button onclick="control('RUN_COUNCIL_CYCLE')">Run council cycle</button>
-          <button onclick="control('RUN_RESEARCH_CYCLE')">Run research cycle</button>
-          <button onclick="autoClose()">Autonomous closure</button>
-          <button onclick="toggleAutonomy(true)">Autonomy ON</button>
-          <button onclick="toggleAutonomy(false)">Autonomy OFF</button>
-          <button onclick="snapshotNow()">Create snapshot</button>
-          <button onclick="control('COUNCIL_ELECT_LEADER')">Elect leader</button>
+        <div class='card' style='max-width:520px; min-width:320px;'>
+          <h2>Operator → Council</h2>
+          <textarea id='operatorNote' placeholder='Type a suggestion, demand, or strategic note to send directly into the council feed...'></textarea>
+          <div style='margin-top:10px;'>
+            <button onclick="sendNote()">Send to council</button>
+            <button onclick="control('RUN_AUTONOMOUS_IMPLEMENTATION')">Autonomous closure</button>
+            <button onclick="control('RUN_COUNCIL_CYCLE')">Run council cycle</button>
+            <button onclick="control('RUN_RESEARCH_CYCLE')">Run research cycle</button>
+            <button onclick="toggleAutonomy(true)">Autonomy ON</button>
+            <button onclick="toggleAutonomy(false)">Autonomy OFF</button>
+            <button onclick="snapshotNow()">Create snapshot</button>
+            <button onclick="control('COUNCIL_ELECT_LEADER')">Elect leader</button>
+          </div>
         </div>
       </div>
       <div class='grid'>
-        <div class='card'><h2>State</h2><pre id='state'>loading...</pre></div>
-        <div class='card'><h2>Wake Packet</h2><pre id='wake'>loading...</pre></div>
-        <div class='card'><h2>Council Thread</h2><pre id='council'>loading...</pre></div>
-        <div class='card'><h2>Division Thread</h2><pre id='divisions'>loading...</pre></div>
-        <div class='card'><h2>Governance / Audit</h2><pre id='governance'>loading...</pre></div>
-        <div class='card'><h2>Deploy Sims</h2><pre id='sims'>loading...</pre></div>
-        <div class='card'><h2>Snapshots</h2><pre id='snapshots'>loading...</pre></div>
-        <div class='card'><h2>Artifacts</h2><pre id='artifacts'>loading...</pre></div>
-        <div class='card'><h2>Executed Artifacts</h2><pre id='executed'>loading...</pre></div>
-        <div class='card'><h2>Hierarchy / Delegation</h2><pre id='hierarchy'>loading...</pre></div>
-        <div class='card'><h2>Mutation Proposals</h2><pre id='proposals'>loading...</pre></div>
-        <div class='card'><h2>Rollback Targets</h2><pre id='rollback'>loading...</pre></div>
+        <div class='card'><h2>State</h2><div class='mono' id='state'>loading...</div></div>
+        <div class='card'><h2>Wake Packet</h2><div class='mono' id='wake'>loading...</div></div>
+        <div class='card'><h2>Council Thread</h2><div id='council'>loading...</div></div>
+        <div class='card'><h2>Division Thread</h2><div id='divisions'>loading...</div></div>
+        <div class='card'><h2>Governance / Audit</h2><div id='governance'>loading...</div></div>
+        <div class='card'><h2>Deploy Sims</h2><div id='sims'>loading...</div></div>
+        <div class='card'><h2>Snapshots</h2><div id='snapshots'>loading...</div></div>
+        <div class='card'><h2>Artifacts</h2><div id='artifacts'>loading...</div></div>
+        <div class='card'><h2>Executed Artifacts</h2><div class='mono' id='executed'>loading...</div></div>
+        <div class='card'><h2>Hierarchy / Delegation</h2><div class='mono' id='hierarchy'>loading...</div></div>
+        <div class='card'><h2>Mutation Proposals</h2><div class='mono' id='proposals'>loading...</div></div>
+        <div class='card'><h2>Rollback Targets</h2><div class='mono' id='rollback'>loading...</div></div>
       </div>
       <script>
         async function getJson(url) {
           const r = await fetch(url, { cache: 'no-store' });
           if (!r.ok) throw new Error(`HTTP ${r.status}`);
           return await r.json();
+        }
+        function escapeHtml(str) {
+          return String(str)
+            .replaceAll('&', '&amp;')
+            .replaceAll('<', '&lt;')
+            .replaceAll('>', '&gt;');
+        }
+        function chapterize(items) {
+          if (!items || !items.length) return '<div class="muted">No entries yet.</div>';
+          return items.slice(-12).reverse().map((item, idx) => {
+            const ts = item.ts || item.content?.ts || 'time-unknown';
+            const body = item.content ? JSON.stringify(item.content, null, 2) : JSON.stringify(item, null, 2);
+            return `<div class="chapter"><div class="chapter-title">Chapter ${idx + 1} • ${escapeHtml(ts)}</div><div class="chapter-body">${escapeHtml(body)}</div></div>`;
+          }).join('');
         }
         async function refresh() {
           const now = new Date().toLocaleTimeString();
@@ -224,12 +247,12 @@ async def view_dashboard():
             ]);
             document.getElementById('state').textContent = JSON.stringify(state, null, 2);
             document.getElementById('wake').textContent = JSON.stringify(wake, null, 2);
-            document.getElementById('council').textContent = JSON.stringify(stream.channels.council || [], null, 2);
-            document.getElementById('divisions').textContent = JSON.stringify(stream.channels.divisions || [], null, 2);
-            document.getElementById('governance').textContent = JSON.stringify(stream.channels.governance || [], null, 2);
-            document.getElementById('sims').textContent = JSON.stringify(stream.channels.deploy_sims || [], null, 2);
-            document.getElementById('snapshots').textContent = JSON.stringify(stream.channels.snapshots || [], null, 2);
-            document.getElementById('artifacts').textContent = JSON.stringify(stream.channels.artifacts || [], null, 2);
+            document.getElementById('council').innerHTML = chapterize(stream.channels.council || []);
+            document.getElementById('divisions').innerHTML = chapterize(stream.channels.divisions || []);
+            document.getElementById('governance').innerHTML = chapterize(stream.channels.governance || []);
+            document.getElementById('sims').innerHTML = chapterize(stream.channels.deploy_sims || []);
+            document.getElementById('snapshots').innerHTML = chapterize(stream.channels.snapshots || []);
+            document.getElementById('artifacts').innerHTML = chapterize(stream.channels.artifacts || []);
             document.getElementById('executed').textContent = JSON.stringify(state.executed_artifacts || [], null, 2);
             document.getElementById('hierarchy').textContent = JSON.stringify(state.delegation_map || {}, null, 2);
             document.getElementById('proposals').textContent = JSON.stringify(state.mutation_proposals || [], null, 2);
@@ -246,8 +269,11 @@ async def view_dashboard():
           await post({command});
           await refresh();
         }
-        async function autoClose() {
-          await post({command:'RUN_AUTONOMOUS_IMPLEMENTATION', authorized_by:'Jack'});
+        async function sendNote() {
+          const text = document.getElementById('operatorNote').value.trim();
+          if (!text) return;
+          await post({command:'OPERATOR_NOTE', authorized_by:'Jack', message:text, source:'Jack /view'});
+          document.getElementById('operatorNote').value = '';
           await refresh();
         }
         async function toggleAutonomy(enabled) {
@@ -313,6 +339,17 @@ async def agent_propose(body: BusRequest):
             state["github_enabled"] = github_ready()
             state["repo_name"] = REPO_NAME
             return envelope(True, state)
+        if command == "OPERATOR_NOTE":
+            note = {
+                "operator": body.authorized_by or "Jack",
+                "message": body.message or "",
+                "source": body.source,
+                "ts": utc_now(),
+            }
+            engine._append_meeting("operator_note", note)
+            engine._append_stream("council", {"kind": "operator_note", **note})
+            await engine.write_ledger("COUNCIL_SYNTHESIS", {"kind": "operator_note", "source": body.source, "authorized_by": body.authorized_by or "Jack", "message": body.message or ""})
+            return envelope(True, {"status": "operator_note_recorded", "note": note})
         if command == "LEDGER_WRITE":
             if body.kind == "manual_snapshot":
                 snap = engine.snapshot("manual_snapshot")
@@ -347,26 +384,11 @@ async def agent_propose(body: BusRequest):
                 return envelope(False, error="not_trusted_for_autonomous_implementation")
             if not github_ready():
                 return envelope(False, error="github_not_configured")
-            plan = await engine.generator.generate_patch_plan({
-                "state": engine.get_state(),
-                "wake": engine.build_wake_packet(),
-                "latest_opportunities": engine.latest_opportunities,
-            })
+            plan = await engine.generator.generate_patch_plan({"state": engine.get_state(), "wake": engine.build_wake_packet(), "latest_opportunities": engine.latest_opportunities})
             simulation = engine.simulate_self_tuning_plan(plan)
             preferred = "APPROVE" if simulation.get("safe") and simulation.get("score", 0) >= 0.65 else "REJECT"
-            vote = governance.call_vote(
-                motion=f"Apply bounded self-tuning plan: {plan.get('rationale', 'grok_plan')}",
-                options=["APPROVE", "REJECT"],
-                agent_count=len(engine.council_agents),
-                preferred=preferred,
-            )
-            closure = {
-                "ts": utc_now(),
-                "plan": plan,
-                "simulation": simulation,
-                "vote": vote,
-                "status": "rejected",
-            }
+            vote = governance.call_vote(motion=f"Apply bounded self-tuning plan: {plan.get('rationale', 'grok_plan')}", options=["APPROVE", "REJECT"], agent_count=len(engine.council_agents), preferred=preferred)
+            closure = {"ts": utc_now(), "plan": plan, "simulation": simulation, "vote": vote, "status": "rejected"}
             if vote.get("winner") == "APPROVE":
                 current_engine = await github_get_file_content("engine.py", "main")
                 updated_engine = apply_self_tuning_patch(current_engine, simulation.get("proposed", {}))
