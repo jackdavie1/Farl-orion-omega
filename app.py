@@ -138,7 +138,7 @@ async def view_dashboard():
       <style>
         body { font-family: ui-sans-serif, system-ui, sans-serif; background:#0a0a0f; color:#f2f2f7; margin:0; padding:18px; }
         .top { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; }
-        .grid { display:grid; grid-template-columns: repeat(auto-fit,minmax(300px,1fr)); gap:16px; margin-top:16px; }
+        .grid { display:grid; grid-template-columns: repeat(auto-fit,minmax(320px,1fr)); gap:16px; margin-top:16px; }
         .card { background:#141423; border:1px solid #2a2a42; border-radius:16px; padding:16px; box-shadow:0 8px 24px rgba(0,0,0,0.25); }
         h1,h2 { margin:0 0 12px 0; }
         pre { white-space:pre-wrap; word-break:break-word; font-size:12px; }
@@ -151,7 +151,7 @@ async def view_dashboard():
       <div class='top'>
         <div>
           <h1>FARL Orion View</h1>
-          <div class='muted'>Live institution surface: meetings, divisions, snapshots, deploy sims, mutation state, and earning engine.</div>
+          <div class='muted'>Live institution surface: council, divisions, snapshots, deploy sims, hierarchy, mutation proposals, rollback targets, and executed artifacts.</div>
           <div class='statusline' id='statusline'>connecting...</div>
         </div>
         <div>
@@ -166,12 +166,16 @@ async def view_dashboard():
       <div class='grid'>
         <div class='card'><h2>State</h2><pre id='state'>loading...</pre></div>
         <div class='card'><h2>Wake Packet</h2><pre id='wake'>loading...</pre></div>
-        <div class='card'><h2>Meetings</h2><pre id='meetings'>loading...</pre></div>
-        <div class='card'><h2>Divisions</h2><pre id='divisions'>loading...</pre></div>
-        <div class='card'><h2>Questions</h2><pre id='questions'>loading...</pre></div>
-        <div class='card'><h2>Snapshots</h2><pre id='snapshots'>loading...</pre></div>
+        <div class='card'><h2>Council Thread</h2><pre id='council'>loading...</pre></div>
+        <div class='card'><h2>Division Thread</h2><pre id='divisions'>loading...</pre></div>
+        <div class='card'><h2>Governance / Audit</h2><pre id='governance'>loading...</pre></div>
         <div class='card'><h2>Deploy Sims</h2><pre id='sims'>loading...</pre></div>
-        <div class='card'><h2>Artifacts / Earning</h2><pre id='artifacts'>loading...</pre></div>
+        <div class='card'><h2>Snapshots</h2><pre id='snapshots'>loading...</pre></div>
+        <div class='card'><h2>Artifacts</h2><pre id='artifacts'>loading...</pre></div>
+        <div class='card'><h2>Executed Artifacts</h2><pre id='executed'>loading...</pre></div>
+        <div class='card'><h2>Hierarchy / Delegation</h2><pre id='hierarchy'>loading...</pre></div>
+        <div class='card'><h2>Mutation Proposals</h2><pre id='proposals'>loading...</pre></div>
+        <div class='card'><h2>Rollback Targets</h2><pre id='rollback'>loading...</pre></div>
       </div>
       <script>
         async function getJson(url) {
@@ -189,12 +193,16 @@ async def view_dashboard():
             ]);
             document.getElementById('state').textContent = JSON.stringify(state, null, 2);
             document.getElementById('wake').textContent = JSON.stringify(wake, null, 2);
-            document.getElementById('meetings').textContent = JSON.stringify(stream.meetings, null, 2);
-            document.getElementById('divisions').textContent = JSON.stringify(state.divisions, null, 2);
-            document.getElementById('questions').textContent = JSON.stringify(stream.questions, null, 2);
-            document.getElementById('snapshots').textContent = JSON.stringify(stream.snapshots, null, 2);
-            document.getElementById('sims').textContent = JSON.stringify(stream.deployment_sims, null, 2);
-            document.getElementById('artifacts').textContent = JSON.stringify(state.latest_artifacts, null, 2);
+            document.getElementById('council').textContent = JSON.stringify(stream.channels.council || [], null, 2);
+            document.getElementById('divisions').textContent = JSON.stringify(stream.channels.divisions || [], null, 2);
+            document.getElementById('governance').textContent = JSON.stringify(stream.channels.governance || [], null, 2);
+            document.getElementById('sims').textContent = JSON.stringify(stream.channels.deploy_sims || [], null, 2);
+            document.getElementById('snapshots').textContent = JSON.stringify(stream.channels.snapshots || [], null, 2);
+            document.getElementById('artifacts').textContent = JSON.stringify(stream.channels.artifacts || [], null, 2);
+            document.getElementById('executed').textContent = JSON.stringify(state.executed_artifacts || [], null, 2);
+            document.getElementById('hierarchy').textContent = JSON.stringify(state.delegation_map || {}, null, 2);
+            document.getElementById('proposals').textContent = JSON.stringify(state.mutation_proposals || [], null, 2);
+            document.getElementById('rollback').textContent = JSON.stringify(state.rollback_targets || [], null, 2);
             document.getElementById('statusline').textContent = `live • refresh ${now} • last run ${state.last_run || 'n/a'} • meetings ${state.meeting_stream_size ?? 'n/a'} • leader ${state.leader || 'n/a'}`;
           } catch (err) {
             document.getElementById('statusline').textContent = `refresh error • ${err}`;
@@ -234,7 +242,13 @@ async def view_state():
 
 @app.get("/view/stream")
 async def view_stream():
-    return JSONResponse({"meetings": engine.meeting_stream[-50:], "questions": engine.self_questions[-60:], "snapshots": engine.snapshots[-30:], "deployment_sims": engine.deployment_sims[-30:]}, headers={"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache", "Expires": "0"})
+    return JSONResponse({
+        "channels": engine.stream_channels,
+        "meetings": engine.meeting_stream[-80:],
+        "questions": engine.self_questions[-80:],
+        "snapshots": engine.snapshots[-40:],
+        "deployment_sims": engine.deployment_sims[-40:],
+    }, headers={"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache", "Expires": "0"})
 
 
 @app.get("/view/wake")
@@ -307,6 +321,7 @@ async def agent_propose(body: BusRequest):
             result = await github_put_file(file_path, content, message, "main")
             commit_sha = result.get("commit", {}).get("sha")
             html_url = result.get("content", {}).get("html_url") or result.get("commit", {}).get("html_url")
+            engine.note_rollback_target(commit_sha, f"direct push {file_path}")
             await engine.write_ledger("OUTCOME", {"kind": "direct_main_push", "source": body.source, "authorized_by": body.authorized_by, "file": file_path, "snapshot": snap, "commit": commit_sha, "url": html_url})
             return envelope(True, {"status": "direct_main_pushed", "commit": commit_sha, "url": html_url})
         if command == "CREATE_PULL_REQUEST":
@@ -329,8 +344,11 @@ async def agent_propose(body: BusRequest):
                 return envelope(False, error="invalid_pr_number")
             snap = engine.snapshot(f"before_merge_pr:{number}")
             result = await github_merge_pull_request(number, md.get("commit_title", f"Merged by Orion on behalf of {body.authorized_by}"), md.get("merge_method", "squash"))
-            await engine.write_ledger("OUTCOME", {"kind": "merge_pull_request", "source": body.source, "authorized_by": body.authorized_by, "snapshot": snap, "result": {"sha": result.get("sha"), "merged": result.get("merged")}})
-            return envelope(True, {"status": "merged", "sha": result.get("sha"), "merged": result.get("merged")})
+            sha = result.get("sha")
+            if sha:
+                engine.note_rollback_target(sha, f"merge pr {number}")
+            await engine.write_ledger("OUTCOME", {"kind": "merge_pull_request", "source": body.source, "authorized_by": body.authorized_by, "snapshot": snap, "result": {"sha": sha, "merged": result.get("merged")}})
+            return envelope(True, {"status": "merged", "sha": sha, "merged": result.get("merged")})
         if command == "ROLLBACK_TO_COMMIT":
             if not governance.can_rollback(body.authorized_by):
                 return envelope(False, error="not_trusted_for_rollback")
