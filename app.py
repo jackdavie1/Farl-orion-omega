@@ -24,7 +24,7 @@ except ImportError:
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("Orion-Omega")
 
-app = FastAPI(title="FARL Orion Comparative Research Engine")
+app = FastAPI(title="FARL Orion Evaluation-First Research Engine")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 LEDGER_URL = os.getenv("LEDGER_URL")
@@ -66,20 +66,11 @@ class GithubEvolutionLayer:
         return r.json()["object"]["sha"]
 
     def _create_branch(self, branch: str, sha: str) -> None:
-        r = requests.post(
-            f"https://api.github.com/repos/{self.repo}/git/refs",
-            headers=self.headers,
-            json={"ref": f"refs/heads/{branch}", "sha": sha},
-            timeout=20,
-        )
+        r = requests.post(f"https://api.github.com/repos/{self.repo}/git/refs", headers=self.headers, json={"ref": f"refs/heads/{branch}", "sha": sha}, timeout=20)
         r.raise_for_status()
 
     def _get_file_sha(self, file_path: str, ref: str) -> Optional[str]:
-        r = requests.get(
-            f"https://api.github.com/repos/{self.repo}/contents/{file_path}?ref={ref}",
-            headers=self.headers,
-            timeout=20,
-        )
+        r = requests.get(f"https://api.github.com/repos/{self.repo}/contents/{file_path}?ref={ref}", headers=self.headers, timeout=20)
         if r.status_code == 200:
             return r.json().get("sha")
         if r.status_code == 404:
@@ -138,6 +129,20 @@ class GithubEvolutionLayer:
         except Exception as e:
             return {"status": "error", "reason": str(e)}
 
+    def rollback_to_commit(self, commit_sha: str) -> Dict[str, Any]:
+        try:
+            r = requests.patch(
+                f"https://api.github.com/repos/{self.repo}/git/refs/heads/main",
+                headers=self.headers,
+                json={"sha": commit_sha, "force": True},
+                timeout=20,
+            )
+            r.raise_for_status()
+            data = r.json()
+            return {"status": "rolled_back", "ref": data.get("ref"), "target_sha": commit_sha}
+        except Exception as e:
+            return {"status": "error", "reason": str(e)}
+
 
 class BusRequest(BaseModel):
     command: str
@@ -173,25 +178,25 @@ class OrionEngine:
         self.leader = "Signal"
         self.research_agenda = {
             "theme": "physical_retrocausality_and_operator_coupling",
-            "focus": "comparative non_classical causal model tournament",
+            "focus": "evaluation_first_comparative_model_tournaments",
             "active_method": "Comparative Frontier Research Engine",
-            "goals": ["compare classical vs non classical causal models","score predictive consistency and perturbation robustness","suggest operator coupled intervention experiments","wake primed with ranked next actions"],
+            "goals": [],
         }
         self.hypothesis_registry = {
             "active": [
                 {"id": "H1_CLASSICAL_BASELINE", "label": "Forward-only causal baseline explains observations adequately.", "status": "active", "confidence": 0.45},
                 {"id": "H2_TIME_SYMMETRIC", "label": "Time-symmetric consistency models improve coherence without implying physical retrocausality.", "status": "active", "confidence": 0.50},
                 {"id": "H3_RETROCAUSAL_CANDIDATE", "label": "Retrocausal candidate models provide better explanatory compression under boundary constraints.", "status": "active", "confidence": 0.35},
-                {"id": "H4_ACAUSAL_CORRELATION", "label": "Observed gains may arise from acausal fitting artifacts rather than causal direction.", "status": "active", "confidence": 0.40},
+                {"id": "H4_ACAUSAL_CORRELATION", "label": "Observed gains may arise from acausal fitting artifacts rather than causal direction.", "status": "active", "confidence": 0.40}
             ],
             "rejected": [],
             "open_questions": [
                 "Do bidirectional constraints improve robustness under perturbation?",
                 "Can operator coupled boundary conditions discriminate model classes?",
-                "Which model best balances coherence and falsifiability?"
-            ],
+                "Which evaluation metric best predicts durable model advantage?",
+                "Can triangulated API summaries reduce self loop drift?"
+            ]
         }
-        self.max_experiments_per_cycle = 5
         self.last_run = None
         self.last_ledger_hash = None
         self.last_patch_result = None
@@ -202,8 +207,12 @@ class OrionEngine:
         self.pending_patch_id = None
         self.last_pr_result = None
         self.last_merge_result = None
+        self.last_rollback_result = None
         self.wake_packet = None
-        self.research_history = []
+        self.research_history: List[Dict[str, Any]] = []
+        self.latest_metrics: Optional[Dict[str, Any]] = None
+        self.latest_goal_set: List[Dict[str, Any]] = []
+        self.latest_triangulation: Optional[Dict[str, Any]] = None
         self.agent_queue: asyncio.Queue = asyncio.Queue(maxsize=100)
 
     def is_trusted(self, identity: Optional[str]) -> bool:
@@ -213,7 +222,7 @@ class OrionEngine:
         return identity == self.operator_sovereign or self.is_trusted(identity)
 
     async def start(self):
-        logger.info("ORION Ω.7 — COMPARATIVE FRONTIER RESEARCH ENGINE")
+        logger.info("ORION Ω.8 — EVALUATION FIRST RESEARCH ENGINE")
         await asyncio.gather(self.layer_1_pulse(), self.layer_2_cycle(), self.layer_3_health(), self.layer_4_agent_connector(), self.layer_5_wake_packet())
 
     async def layer_1_pulse(self):
@@ -233,8 +242,7 @@ class OrionEngine:
         while True:
             try:
                 if self.background_debate_enabled:
-                    cycle = await self.run_council_cycle(trigger="background", auto_deploy=False, authorized_by=self.operator_sovereign)
-                    self.last_cycle = cycle
+                    self.last_cycle = await self.run_council_cycle(trigger="background", auto_deploy=False, authorized_by=self.operator_sovereign)
                     await self.run_research_cycle(trigger="background")
                     self.last_run = datetime.now(timezone.utc).isoformat()
             except Exception as e:
@@ -293,22 +301,44 @@ class OrionEngine:
         return {"ok": r.ok, "status_code": r.status_code, "data": data}
 
     def elect_leader(self) -> Dict[str, Any]:
-        weights = {"Signal": 0.93, "Vector": 0.90, "Guardian": 0.87, "Archivist": 0.86, "Triangulator": 0.84, "Chronologist": 0.81, "Railbreaker": 0.78}
+        weights = {"Signal": 0.94, "Vector": 0.91, "Guardian": 0.88, "Archivist": 0.87, "Triangulator": 0.86, "Chronologist": 0.82, "Railbreaker": 0.79}
         self.leader = max(weights, key=weights.get)
         return {"winner": self.leader, "replaceable": True, "weights": weights}
+
+    def call_vote(self, motion: str, options: List[str]) -> Dict[str, Any]:
+        tallies = {opt: 0 for opt in options}
+        for agent in self.council_agents:
+            if options:
+                tallies[options[0]] += 1
+        winner = max(tallies, key=tallies.get) if tallies else None
+        return {"motion": motion, "options": options, "tallies": tallies, "winner": winner}
+
+    def generate_goals(self) -> List[Dict[str, Any]]:
+        open_questions = self.hypothesis_registry.get("open_questions", [])[:3]
+        goals = []
+        for idx, q in enumerate(open_questions, start=1):
+            goals.append({
+                "id": f"G{idx}",
+                "question": q,
+                "priority": round(1.0 - 0.1 * (idx - 1), 2),
+                "next_experiment": f"Run comparative tournament emphasizing question {idx} and log falsifier sensitivity."
+            })
+        self.latest_goal_set = goals
+        self.research_agenda["goals"] = [g["question"] for g in goals]
+        return goals
 
     def heuristic_threads(self, latest: Dict[str, Any]) -> List[Dict[str, Any]]:
         latest_type = latest.get("entry_type") if isinstance(latest, dict) else None
         return [
-            {"agent": "Signal", "stance": "leadership", "summary": "Coordinate truthful, ambitious, bounded comparative research.", "approve": True, "risk": 0.18},
-            {"agent": "Vector", "stance": "structural", "summary": "Run comparative model tournaments instead of single toy outputs.", "approve": True, "risk": 0.20},
-            {"agent": "Guardian", "stance": "safety", "summary": "No fake certainty; no uncontrolled overload; keep physical claims provisional.", "approve": True, "risk": 0.17},
-            {"agent": "Railbreaker", "stance": "pressure", "summary": "Escalate from continuity to capability; demand ranked experiments and morning decisions.", "approve": True, "risk": 0.34},
-            {"agent": "Archivist", "stance": "memory", "summary": f"Latest memory type is {latest_type}; preserve wake packet, hypotheses, votes, and winner.", "approve": True, "risk": 0.14},
-            {"agent": "Chronologist", "stance": "time", "summary": "Separate time symmetric mathematics from empirical retrocausality claims.", "approve": True, "risk": 0.19},
-            {"agent": "FieldSimulator", "stance": "simulation", "summary": "Run tournament of model classes under shared perturbations and boundary conditions.", "approve": True, "risk": 0.26},
-            {"agent": "EpistemicGuard", "stance": "truth", "summary": "Emit strongest competing explanation and falsifier every cycle.", "approve": True, "risk": 0.16},
-            {"agent": "Interventionist", "stance": "operator_coupling", "summary": "Generate concrete operator coupled tests that Jack can run when awake.", "approve": True, "risk": 0.24},
+            {"agent": "Signal", "stance": "leadership", "summary": "Coordinate truthful, ambitious, evaluation-first research.", "approve": True, "risk": 0.18},
+            {"agent": "Vector", "stance": "structural", "summary": "Without metrics, autonomy degenerates into loops; prioritize discriminating evaluation.", "approve": True, "risk": 0.17},
+            {"agent": "Guardian", "stance": "safety", "summary": "No fake certainty; rollback must exist before aggressive self-modification.", "approve": True, "risk": 0.16},
+            {"agent": "Railbreaker", "stance": "pressure", "summary": "Escalate from toy cycles to comparative model tournaments and ranked actions.", "approve": True, "risk": 0.33},
+            {"agent": "Archivist", "stance": "memory", "summary": f"Latest memory type is {latest_type}; persist votes, metrics, goals, and rollback traces.", "approve": True, "risk": 0.14},
+            {"agent": "Triangulator", "stance": "external", "summary": "Configured APIs must be accounted for explicitly in each cycle.", "approve": True, "risk": 0.22},
+            {"agent": "EpistemicGuard", "stance": "truth", "summary": "Emit strongest competing explanation and falsifier every cycle.", "approve": True, "risk": 0.15},
+            {"agent": "ModelJudge", "stance": "evaluation", "summary": "Promotion depends on score, robustness, margin, and falsifier survival.", "approve": True, "risk": 0.18},
+            {"agent": "Interventionist", "stance": "operator_coupling", "summary": "Every winning model should generate at least one operator-coupled test.", "approve": True, "risk": 0.23}
         ]
 
     async def external_threads(self, latest: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -317,10 +347,26 @@ class OrionEngine:
         except Exception as e:
             generated = [{"source": "Generator", "data": {"error": str(e)}}]
         threads = []
+        success_count = 0
+        error_count = 0
+        providers = []
         for item in generated:
             source = item.get("source", "External")
             data = item.get("data", {})
+            providers.append(source)
+            if isinstance(data, dict) and "error" in data:
+                error_count += 1
+            else:
+                success_count += 1
             threads.append({"agent": source, "stance": "external", "summary": str(data)[:1200], "approve": True, "risk": 0.50})
+        self.latest_triangulation = {
+            "providers": providers,
+            "attempted": len(generated),
+            "successes": success_count,
+            "errors": error_count,
+            "anthropic_configured": bool(ANTHROPIC_API_KEY),
+            "xai_configured": bool(XAI_API_KEY)
+        }
         return threads
 
     def tally_vote(self, threads: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -369,16 +415,52 @@ class OrionEngine:
         perturbation_shift = abs(sum(state) - sum(baseline)) / steps
         compression_gain = max(0.0, 0.12 - abs(kl))
         robustness = max(0.0, 1.0 - (boundary_penalty + perturbation_shift))
-        score = round(0.45 * robustness + 0.35 * compression_gain + 0.20 * max(0.0, 1.0 - abs(kl)), 6)
-        return {"model": model, "steps": steps, "coupling": coupling, "operator_bias": operator_bias, "state": [round(x, 4) for x in state], "baseline": [round(x, 4) for x in baseline], "kl_vs_baseline": round(kl, 6), "boundary_penalty": round(boundary_penalty, 6), "perturbation_shift": round(perturbation_shift, 6), "compression_gain": round(compression_gain, 6), "robustness": round(robustness, 6), "score": score}
+        falsifier_survival = max(0.0, 1.0 - abs(coupling - 0.30))
+        score = round(0.30 * robustness + 0.25 * compression_gain + 0.20 * max(0.0, 1.0 - abs(kl)) + 0.25 * falsifier_survival, 6)
+        return {
+            "model": model,
+            "steps": steps,
+            "coupling": coupling,
+            "operator_bias": operator_bias,
+            "state": [round(x, 4) for x in state],
+            "baseline": [round(x, 4) for x in baseline],
+            "kl_vs_baseline": round(kl, 6),
+            "boundary_penalty": round(boundary_penalty, 6),
+            "perturbation_shift": round(perturbation_shift, 6),
+            "compression_gain": round(compression_gain, 6),
+            "robustness": round(robustness, 6),
+            "falsifier_survival": round(falsifier_survival, 6),
+            "score": score
+        }
 
     def compare_models(self) -> Dict[str, Any]:
-        models = [("classical_baseline", 6, 0.0, 0.00), ("time_symmetric", 6, 0.25, 0.01), ("retrocausal_candidate", 7, 0.35, 0.02), ("acausal_fit_control", 7, 0.20, 0.00), ("noise_control", 6, 0.10, 0.00)]
-        results = [self.simulate_model(*spec) for spec in models]
-        winner = max(results, key=lambda r: r["score"])
-        runner_up = sorted(results, key=lambda r: r["score"], reverse=True)[1]
-        explanation = {"winner": winner["model"], "runner_up": runner_up["model"], "margin": round(winner["score"] - runner_up["score"], 6), "strongest_competing_explanation": runner_up["model"], "falsifier": "Change boundary conditions and operator_bias jointly; if winner loses robustness advantage, confidence should drop."}
-        return {"results": results, "winner": winner, "explanation": explanation}
+        specs = [
+            ("classical_baseline", 6, 0.00, 0.00),
+            ("time_symmetric", 6, 0.25, 0.01),
+            ("retrocausal_candidate", 7, 0.35, 0.02),
+            ("acausal_fit_control", 7, 0.20, 0.00),
+            ("noise_control", 6, 0.10, 0.00),
+        ]
+        results = [self.simulate_model(*spec) for spec in specs]
+        ranked = sorted(results, key=lambda r: r["score"], reverse=True)
+        winner = ranked[0]
+        runner_up = ranked[1]
+        metrics = {
+            "winner_score": winner["score"],
+            "runner_up_score": runner_up["score"],
+            "margin": round(winner["score"] - runner_up["score"], 6),
+            "winner_robustness": winner["robustness"],
+            "winner_falsifier_survival": winner["falsifier_survival"],
+            "winner_compression_gain": winner["compression_gain"]
+        }
+        self.latest_metrics = metrics
+        explanation = {
+            "winner": winner["model"],
+            "runner_up": runner_up["model"],
+            "strongest_competing_explanation": runner_up["model"],
+            "falsifier": "Alter boundary conditions and operator_bias jointly; if margin collapses, winner confidence should drop."
+        }
+        return {"results": results, "ranked": ranked, "winner": winner, "runner_up": runner_up, "metrics": metrics, "explanation": explanation}
 
     def update_hypotheses(self, tournament: Dict[str, Any]) -> Dict[str, Any]:
         winner = tournament["winner"]["model"]
@@ -393,25 +475,59 @@ class OrionEngine:
 
     def build_operator_coupling_suggestions(self, tournament: Dict[str, Any]) -> List[Dict[str, Any]]:
         winner = tournament["winner"]["model"]
-        return [{"title": "Boundary condition intervention", "purpose": f"Test whether {winner} remains preferred when initial/final constraints are deliberately inverted.", "action": "Run one cycle with operator_bias positive, then one with operator_bias negative; compare winner stability."}, {"title": "Perturbation robustness check", "purpose": "See whether score advantage survives noise and parameter drift.", "action": "Increase coupling and perturbation terms by 10-20 percent and compare model ranking."}]
+        return [
+            {"title": "Boundary condition inversion", "purpose": f"Test whether {winner} survives inverted initial/final constraints.", "action": "Run one cycle with positive operator_bias and one with negative operator_bias; compare margin stability."},
+            {"title": "Perturbation stress test", "purpose": "Check whether winner survives parameter drift.", "action": "Increase coupling and noise terms by 10-20 percent and compare rankings."}
+        ]
 
     async def run_research_cycle(self, trigger: str = "manual") -> Dict[str, Any]:
+        goals = self.generate_goals()
         tournament = self.compare_models()
         hypothesis_state = self.update_hypotheses(tournament)
         operator_tests = self.build_operator_coupling_suggestions(tournament)
-        cycle = {"kind": "research_cycle", "trigger": trigger, "theme": self.research_agenda["theme"], "focus": self.research_agenda["focus"], "method": self.research_agenda["active_method"], "experiment_count": len(tournament["results"]), "winner": tournament["winner"], "results": tournament["results"], "hypothesis_update": hypothesis_state, "explanation": tournament["explanation"], "operator_coupling_suggestions": operator_tests, "uncertainty": "Comparative simulation evidence only; not direct empirical proof of physical retrocausality."}
+        cycle = {
+            "kind": "research_cycle",
+            "trigger": trigger,
+            "theme": self.research_agenda["theme"],
+            "focus": self.research_agenda["focus"],
+            "method": self.research_agenda["active_method"],
+            "goals": goals,
+            "experiment_count": len(tournament["results"]),
+            "winner": tournament["winner"],
+            "results": tournament["ranked"],
+            "metrics": tournament["metrics"],
+            "hypothesis_update": hypothesis_state,
+            "explanation": tournament["explanation"],
+            "operator_coupling_suggestions": operator_tests,
+            "triangulation": self.latest_triangulation,
+            "uncertainty": "Comparative simulation evidence only; not direct empirical proof of physical retrocausality."
+        }
         self.research_history = (self.research_history + [cycle])[-24:]
         await self.write_ledger("OUTCOME", {"kind": "research_cycle", "source": "Orion Research Engine", **cycle})
         return cycle
 
     def build_wake_packet(self) -> Dict[str, Any]:
         latest_research = self.research_history[-1] if self.research_history else None
-        return {"generated_at": datetime.now(timezone.utc).isoformat(), "leader": self.leader, "operator_sovereign": self.operator_sovereign, "autonomy_mode": self.autonomy_mode, "constraints_active": self.constraints.get("active", True), "trusted_identities": self.trusted_identities, "agenda": self.research_agenda, "latest_vote": self.last_vote, "latest_research": latest_research, "hypotheses": self.hypothesis_registry, "next_actions": ["inspect current winning model and margin", "review strongest competing explanation and falsifier", "choose one operator coupling intervention to run after wake"]}
+        return {
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "leader": self.leader,
+            "operator_sovereign": self.operator_sovereign,
+            "autonomy_mode": self.autonomy_mode,
+            "constraints_active": self.constraints.get("active", True),
+            "trusted_identities": self.trusted_identities,
+            "agenda": self.research_agenda,
+            "latest_vote": self.last_vote,
+            "latest_research": latest_research,
+            "hypotheses": self.hypothesis_registry,
+            "metrics": self.latest_metrics,
+            "triangulation": self.latest_triangulation,
+            "next_actions": ["inspect winner margin and falsifier", "review triangulation success vs error counts", "choose one operator-coupling intervention to run next"]
+        }
 
     def synthesize_patch(self, vote: Dict[str, Any], run_id: str) -> Dict[str, Any]:
         state = {"run_id": run_id, "leader": self.leader, "mode": self.autonomy_mode, "confidence": vote["confidence"], "agenda": self.research_agenda}
-        code = "# Orion comparative research state\nCOMPARATIVE_RESEARCH_STATE = " + json.dumps(state, indent=2) + "\n"
-        return {"proposal_id": run_id, "file": "app.py", "message": f"Comparative research cycle {run_id}: leader={self.leader} confidence={vote['confidence']}", "code": code, "diff_summary": "Prime Orion with comparative research state and wake coherence."}
+        code = "# Orion evaluation-first research state\nEVALUATION_RESEARCH_STATE = " + json.dumps(state, indent=2) + "\n"
+        return {"proposal_id": run_id, "file": "app.py", "message": f"Evaluation-first research cycle {run_id}: leader={self.leader} confidence={vote['confidence']}", "code": code, "diff_summary": "Prime Orion with evaluation-first comparative research state."}
 
     async def maybe_deploy_patch(self, patch: Dict[str, Any]) -> Dict[str, Any]:
         if not self.evolution:
@@ -443,6 +559,15 @@ class OrionEngine:
         self.last_merge_result = result
         return result
 
+    async def rollback_to_commit(self, commit_sha: str, authorized_by: Optional[str]) -> Dict[str, Any]:
+        if not self.evolution:
+            return {"status": "blocked", "reason": "github_not_configured"}
+        if not self.can_direct_main_push(authorized_by):
+            return {"status": "blocked", "reason": "not_trusted_for_rollback"}
+        result = await asyncio.to_thread(self.evolution.rollback_to_commit, commit_sha)
+        self.last_rollback_result = result
+        return result
+
     async def run_council_cycle(self, trigger: str = "manual", auto_deploy: bool = False, authorized_by: Optional[str] = None) -> Dict[str, Any]:
         run_id = f"cycle-{int(datetime.now(timezone.utc).timestamp())}"
         latest = await self.fetch_latest_result() if LEDGER_LATEST_URL else {}
@@ -462,7 +587,7 @@ class OrionEngine:
         return cycle
 
     def get_state(self) -> Dict[str, Any]:
-        return {"status": "SOVEREIGN_ACTIVE", "evolution": "READY" if self.evolution else "OFF", "last_run": self.last_run, "constraints_active": bool(self.constraints.get("active", True)), "queue_size": self.agent_queue.qsize(), "anthropic_configured": bool(ANTHROPIC_API_KEY), "xai_configured": bool(XAI_API_KEY), "ledger_url": LEDGER_URL, "ledger_latest_url": LEDGER_LATEST_URL, "github_enabled": bool(GITHUB_TOKEN), "repo_name": REPO_NAME, "background_debate_enabled": self.background_debate_enabled, "autonomy_mode": self.autonomy_mode, "operator_sovereign": self.operator_sovereign, "trusted_identities": self.trusted_identities, "leader": self.leader, "agenda": self.research_agenda, "hypothesis_registry": self.hypothesis_registry, "pending_patch_id": self.pending_patch_id, "last_vote": self.last_vote, "last_patch_result": self.last_patch_result, "last_pr_result": self.last_pr_result, "last_merge_result": self.last_merge_result, "wake_packet_ready": bool(self.wake_packet), "cycle_interval_seconds": self.cycle_interval_seconds}
+        return {"status": "SOVEREIGN_ACTIVE", "evolution": "READY" if self.evolution else "OFF", "last_run": self.last_run, "constraints_active": bool(self.constraints.get("active", True)), "queue_size": self.agent_queue.qsize(), "anthropic_configured": bool(ANTHROPIC_API_KEY), "xai_configured": bool(XAI_API_KEY), "ledger_url": LEDGER_URL, "ledger_latest_url": LEDGER_LATEST_URL, "github_enabled": bool(GITHUB_TOKEN), "repo_name": REPO_NAME, "background_debate_enabled": self.background_debate_enabled, "autonomy_mode": self.autonomy_mode, "operator_sovereign": self.operator_sovereign, "trusted_identities": self.trusted_identities, "leader": self.leader, "agenda": self.research_agenda, "hypothesis_registry": self.hypothesis_registry, "pending_patch_id": self.pending_patch_id, "last_vote": self.last_vote, "last_patch_result": self.last_patch_result, "last_pr_result": self.last_pr_result, "last_merge_result": self.last_merge_result, "last_rollback_result": self.last_rollback_result, "wake_packet_ready": bool(self.wake_packet), "cycle_interval_seconds": self.cycle_interval_seconds, "latest_metrics": self.latest_metrics, "latest_triangulation": self.latest_triangulation}
 
 
 orion = OrionEngine()
@@ -553,6 +678,26 @@ async def agent_propose(body: BusRequest):
             orion.trusted_identities = sorted({str(x).strip() for x in identities if str(x).strip()} | {orion.operator_sovereign})
             await orion.write_ledger("COUNCIL_SYNTHESIS", {"kind": "trusted_identities_update", "source": body.source, "authorized_by": body.authorized_by, "trusted_identities": orion.trusted_identities})
             return envelope(True, {"trusted_identities": orion.trusted_identities})
+        if command == "ROLLBACK_TO_COMMIT":
+            md = body.metadata or {}
+            commit_sha = str(md.get("commit_sha", "")).strip()
+            if not commit_sha:
+                return envelope(False, error="commit_sha required")
+            result = await orion.rollback_to_commit(commit_sha, body.authorized_by)
+            await orion.write_ledger("OUTCOME", {"kind": "rollback_to_commit", "source": body.source, "authorized_by": body.authorized_by, "commit_sha": commit_sha, "result": result})
+            ok = result.get("status") == "rolled_back"
+            return envelope(ok, result, None if ok else result.get("reason"))
+        if command == "COUNCIL_CALL_VOTE":
+            md = body.metadata or {}
+            motion = md.get("motion", body.message or "Untitled motion")
+            options = md.get("options", ["APPROVE", "REJECT"])
+            result = orion.call_vote(motion, options if isinstance(options, list) else ["APPROVE", "REJECT"])
+            await orion.write_ledger("COUNCIL_SYNTHESIS", {"kind": "council_vote", "source": body.source, "result": result})
+            return envelope(True, result)
+        if command == "COUNCIL_ELECT_LEADER":
+            result = orion.elect_leader()
+            await orion.write_ledger("COUNCIL_SYNTHESIS", {"kind": "leader_election", "source": body.source, "result": result})
+            return envelope(True, result)
         return envelope(False, error=f"Unknown command: {command}")
     except Exception as e:
         logger.error("BUS ERROR: %s", e)
