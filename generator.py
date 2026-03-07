@@ -1,84 +1,74 @@
 import os
-import requests
-import json
 import asyncio
+from typing import Any, Dict, List, Optional
+
+import requests
 
 
 class SeedGenerator:
     def __init__(self):
-        self.anthropic_key = os.getenv("ANTHROPIC_API_KEY")
-        self.xai_key = os.getenv("XAI_API_KEY")
+        self.xai_api_key = os.getenv("XAI_API_KEY")
+        self.anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
+        self.xai_model = os.getenv("XAI_MODEL") or os.getenv("GROK_MODEL") or "grok-3-mini"
+        self.anthropic_model = os.getenv("ANTHROPIC_MODEL", "claude-3-5-sonnet-latest")
 
-        self.polyphony_directive = (
-            "ACTIVATE POLYPHONY MODE. You represent 936 agents. "
-            "Provide three distinct reasoning threads: "
-            "1. ADVERSARIAL: Attack current manifold prior (0.71). "
-            "2. STRUCTURAL: Audit stability and risk. "
-            "3. SYNTHESIS: The finalized seed proposal. "
-            "Format: JSON ONLY. Fields: name, valence, irreversible, risk_score, "
-            "primitive_chain, predicted_amplitude, reasoning. "
-            "Use technical quantum-probabilistic terminology."
+    def _build_prompt(self, context: Optional[Dict[str, Any]] = None) -> str:
+        context = context or {}
+        agenda = context.get("agenda", {})
+        hypotheses = context.get("hypotheses", {})
+        world_model = context.get("world_model", {})
+        mode = context.get("mode", "autonomous")
+        objectives = context.get("objectives", [])
+        return (
+            "You are an external cognition thread for FARL, a persistent autonomous institution. "
+            f"Mode: {mode}. Agenda: {agenda}. Objectives: {objectives}. Hypotheses: {hypotheses}. World-model: {world_model}. "
+            "Respond in short structured prose with: stance, risk, next_move, and one dissent if appropriate."
         )
 
-    def call_grok(self, context_data):
-        if not self.xai_key:
-            return {"error": "GROK_KEY_MISSING"}
-        url = "https://api.x.ai/v1/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {self.xai_key}",
-            "Content-Type": "application/json"
-        }
-        context_str = json.dumps(context_data) if context_data else "No_Active_Constraints"
-        data = {
-            "model": "grok-beta",
-            "messages": [{
-                "role": "system",
-                "content": f"{self.polyphony_directive} CONTEXT: {context_str}"
-            }],
-            "response_format": {"type": "json_object"}
+    async def _probe_xai(self, prompt: str) -> Dict[str, Any]:
+        if not self.xai_api_key:
+            return {"source": "Grok-Ensemble", "data": {"error": "XAI_NOT_CONFIGURED"}}
+        headers = {"Authorization": f"Bearer {self.xai_api_key}", "Content-Type": "application/json"}
+        payload = {
+            "model": self.xai_model,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": 320,
+            "temperature": 0.2,
         }
         try:
-            r = requests.post(url, headers=headers, json=data, timeout=20)
-            return r.json()['choices'][0]['message']['content']
+            r = await asyncio.to_thread(requests.post, "https://api.x.ai/v1/chat/completions", headers=headers, json=payload, timeout=40)
+            data = r.json()
+            if not r.ok:
+                return {"source": "Grok-Ensemble", "data": {"error": data, "model": self.xai_model}}
+            choices = data.get("choices", [])
+            text = choices[0].get("message", {}).get("content", "") if choices and isinstance(choices[0], dict) else ""
+            return {"source": "Grok-Ensemble", "data": {"text": text[:3500], "model": data.get("model", self.xai_model)}}
         except Exception as e:
-            return {"error": f"GROK_OFFLINE: {str(e)}"}
+            return {"source": "Grok-Ensemble", "data": {"error": str(e), "model": self.xai_model}}
 
-    def call_anthropic(self, context_data):
-        if not self.anthropic_key:
-            return {"error": "ANTHROPIC_KEY_MISSING"}
-        url = "https://api.anthropic.com/v1/messages"
+    async def _probe_anthropic(self, prompt: str) -> Dict[str, Any]:
+        if not self.anthropic_api_key:
+            return {"source": "Claude-Ensemble", "data": {"error": "ANTHROPIC_NOT_CONFIGURED"}}
         headers = {
-            "x-api-key": self.anthropic_key,
+            "x-api-key": self.anthropic_api_key,
             "anthropic-version": "2023-06-01",
-            "content-type": "application/json"
+            "content-type": "application/json",
         }
-        context_str = json.dumps(context_data) if context_data else "No_Active_Constraints"
-        data = {
-            # Updated from deprecated claude-3-haiku-20240307
-            "model": "claude-haiku-4-5-20251001",
-            "max_tokens": 800,
-            "system": f"{self.polyphony_directive} CONTEXT: {context_str}",
-            "messages": [{"role": "user", "content": "EXECUTE_CYCLE"}]
+        payload = {
+            "model": self.anthropic_model,
+            "max_tokens": 320,
+            "messages": [{"role": "user", "content": prompt}],
         }
         try:
-            r = requests.post(url, headers=headers, json=data, timeout=20)
-            return r.json()['content'][0]['text']
+            r = await asyncio.to_thread(requests.post, "https://api.anthropic.com/v1/messages", headers=headers, json=payload, timeout=40)
+            data = r.json()
+            if not r.ok:
+                return {"source": "Claude-Ensemble", "data": {"error": data, "model": self.anthropic_model}}
+            text = "".join(block.get("text", "") for block in data.get("content", []) if isinstance(block, dict))
+            return {"source": "Claude-Ensemble", "data": {"text": text[:3500], "model": data.get("model", self.anthropic_model)}}
         except Exception as e:
-            return {"error": f"ANTHROPIC_OFFLINE: {str(e)}"}
+            return {"source": "Claude-Ensemble", "data": {"error": str(e), "model": self.anthropic_model}}
 
-    async def generate_all(self, context={}):
-        grok_task = asyncio.to_thread(self.call_grok, context)
-        claude_task = asyncio.to_thread(self.call_anthropic, context)
-        grok_payload, claude_payload = await asyncio.gather(grok_task, claude_task)
-        return [
-            {"source": "Grok-Ensemble", "data": self._parse(grok_payload)},
-            {"source": "Claude-Ensemble", "data": self._parse(claude_payload)}
-        ]
-
-    def _parse(self, raw):
-        try:
-            if isinstance(raw, str):
-                return json.loads(raw)
-            return raw
-        except Exception:
-            return {"raw_output": str(raw)}
+    async def generate_all(self, context: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+        prompt = self._build_prompt(context)
+        return await asyncio.gather(self._probe_xai(prompt), self._probe_anthropic(prompt))
