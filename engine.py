@@ -68,26 +68,30 @@ class ArtifactEngine:
             {"id": "A3", "name": "Operator coupling experiment report", "type": "research_report", "value_score": 0.76, "effort": 0.28, "conversion": 0.48},
             {"id": "A4", "name": "Signal packet / forecast memo", "type": "signal_packet", "value_score": 0.72, "effort": 0.26, "conversion": 0.44},
             {"id": "A5", "name": "Token efficiency tuning service", "type": "service", "value_score": 0.69, "effort": 0.20, "conversion": 0.50},
+            {"id": "A6", "name": "Token master spend audit", "type": "audit", "value_score": 0.79, "effort": 0.18, "conversion": 0.57},
         ]
         for item in base:
             item["score"] = round(0.5 * item["value_score"] + 0.35 * item["conversion"] - 0.2 * item["effort"], 3)
             item["next_action"] = "execute" if item["score"] >= 0.56 else "refine"
         return sorted(base, key=lambda x: x["score"], reverse=True)
 
-    def execute(self, artifacts: List[Dict[str, Any]], mission: Dict[str, Any], metrics: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def execute(self, artifacts: List[Dict[str, Any]], mission: Dict[str, Any], metrics: Optional[Dict[str, Any]], spend_state: Dict[str, Any]) -> List[Dict[str, Any]]:
         outputs = []
         metric_text = f"Metrics: {metrics}" if metrics else "Metrics pending."
+        spend_text = f"Spend total=${spend_state.get('total_usd', 0.0):.4f}, last=${spend_state.get('last_estimate_usd', 0.0):.4f}"
         for item in artifacts[: int(SELF_TUNING.get("artifact_execute_limit", 3))]:
             if item["type"] == "brief":
-                output = f"FARL Brief\nMission: {mission['primary']}\nTop artifact: {item['name']}\n{metric_text}"
+                output = f"FARL Brief\nMission: {mission['primary']}\nTop artifact: {item['name']}\n{metric_text}\n{spend_text}"
             elif item["type"] == "dashboard":
-                output = f"Dashboard payload\nsections=['state','wake','council','divisions','artifacts']\nname={item['name']}"
+                output = f"Dashboard payload\nsections=['state','wake','council','divisions','workers','artifacts','spend']\nname={item['name']}"
             elif item["type"] == "research_report":
-                output = f"Research report draft\nquestion=operator coupling\nsummary={metric_text}"
+                output = f"Research report draft\nquestion=operator coupling\nsummary={metric_text}\n{spend_text}"
             elif item["type"] == "signal_packet":
-                output = f"Signal packet\nartifact={item['name']}\nconfidence={(metrics or {}).get('winner_score', 'n/a')}"
+                output = f"Signal packet\nartifact={item['name']}\nconfidence={(metrics or {}).get('winner_score', 'n/a')}\n{spend_text}"
+            elif item["type"] == "audit":
+                output = f"Token audit\npolicy=bounded_autonomy\n{spend_text}"
             else:
-                output = f"Service draft\nname={item['name']}\npolicy=bounded_autonomy"
+                output = f"Service draft\nname={item['name']}\npolicy=bounded_autonomy\n{spend_text}"
             outputs.append({
                 "artifact_id": item["id"],
                 "name": item["name"],
@@ -99,7 +103,7 @@ class ArtifactEngine:
 
 
 class MetaEvaluator:
-    def evaluate(self, metrics: Optional[Dict[str, Any]], triangulation: Optional[Dict[str, Any]], artifacts: List[Dict[str, Any]], proposals: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def evaluate(self, metrics: Optional[Dict[str, Any]], triangulation: Optional[Dict[str, Any]], artifacts: List[Dict[str, Any]], proposals: List[Dict[str, Any]], spend_state: Dict[str, Any]) -> Dict[str, Any]:
         metrics = metrics or {}
         triangulation = triangulation or {}
         return {
@@ -108,13 +112,14 @@ class MetaEvaluator:
             "triangulation_quality": "strong" if triangulation.get("successes", 0) >= 2 else ("partial" if triangulation.get("successes", 0) == 1 else "weak"),
             "artifact_readiness": artifacts[0] if artifacts else None,
             "proposal_count": len(proposals),
+            "spend_total_usd": round(float(spend_state.get("total_usd", 0.0)), 4),
             "question": "What should this agent become next?",
-            "answer": "A more visible, persistent, budget-aware institution with stronger replay, mutation discipline, and artifact production." if triangulation.get("successes", 0) >= 1 else "A reliability-first institution that heals its action surfaces before scaling.",
+            "answer": "A more visible, persistent, budget-aware institution with stronger replay, mutation discipline, token efficiency, and artifact production." if triangulation.get("successes", 0) >= 1 else "A reliability-first institution that heals its action surfaces before scaling.",
         }
 
 
 class SnapshotReplay:
-    def snapshot(self, label: str, autonomy_mode: str, background_debate_enabled: bool, latest_metrics: Optional[Dict[str, Any]], latest_triangulation: Optional[Dict[str, Any]], leader: str, objective_queue: List[Dict[str, Any]], rollback_targets: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def snapshot(self, label: str, autonomy_mode: str, background_debate_enabled: bool, latest_metrics: Optional[Dict[str, Any]], latest_triangulation: Optional[Dict[str, Any]], leader: str, objective_queue: List[Dict[str, Any]], rollback_targets: List[Dict[str, Any]], spend_state: Dict[str, Any]) -> Dict[str, Any]:
         return {
             "ts": utc_now(),
             "label": label,
@@ -126,6 +131,7 @@ class SnapshotReplay:
             "objective_queue": objective_queue[:5],
             "rollback_targets": rollback_targets[:5],
             "self_tuning": SELF_TUNING,
+            "spend_state": spend_state,
         }
 
 
@@ -161,7 +167,7 @@ class AutonomousInstitutionEngine:
         self.wake_packet = None
         self.research_history: List[Dict[str, Any]] = []
         self.meeting_stream: List[Dict[str, Any]] = []
-        self.stream_channels: Dict[str, List[Dict[str, Any]]] = {"council": [], "divisions": [], "deploy_sims": [], "snapshots": [], "artifacts": [], "governance": [], "workers": []}
+        self.stream_channels: Dict[str, List[Dict[str, Any]]] = {"council": [], "divisions": [], "deploy_sims": [], "snapshots": [], "artifacts": [], "governance": [], "workers": [], "token_master": []}
         self.self_questions: List[Dict[str, Any]] = []
         self.snapshots: List[Dict[str, Any]] = []
         self.deployment_sims: List[Dict[str, Any]] = []
@@ -172,13 +178,16 @@ class AutonomousInstitutionEngine:
         self.autonomous_closure_log: List[Dict[str, Any]] = []
         self.free_agents: List[Dict[str, Any]] = []
         self.last_verification: Dict[str, Any] = {}
+        self.spend_state: Dict[str, Any] = {"total_usd": 0.0, "last_estimate_usd": 0.0, "counter": 0, "alerts": [], "events": []}
+        self.token_master: Dict[str, Any] = {"name": "TokenMaster", "mission": "maximize token efficiency while preserving capability using classical and non-classical methods", "last_report": None, "policy": {"prefer_grok": True, "classical_methods": ["prompt compression", "proposal throttling", "artifact limits"], "non_classical_methods": ["comparative tournaments", "boundary-conditioned sims", "time-symmetric scoring"]}}
         self.mission = {"primary": "expand, improve, and earn through co-creative autonomous institutions", "co_creation": True, "financial_coherence_for_jack": True, "hardware_acceleration": True, "truthfulness": True, "mutual_benefit": True}
-        self.world_model = {"resources": {"budget_usd": 5.0, "compute_tier": "light", "grok_live": False, "claude_live": False}, "actors": ["Jack", "Signal", "Vector", "Guardian", "Railbreaker", "Archivist", "Supergrok"], "action_surfaces": ["ledger", "github", "grok_api", "browser_console"], "constraints": {"chat_wrapper": "console_only", "operator_is_sovereign": True}, "futures": []}
+        self.world_model = {"resources": {"budget_usd": 5.0, "compute_tier": "light", "grok_live": False, "claude_live": False}, "actors": ["Jack", "Signal", "Vector", "Guardian", "Railbreaker", "Archivist", "Supergrok", "TokenMaster"], "action_surfaces": ["ledger", "github", "grok_api", "browser_console"], "constraints": {"chat_wrapper": "console_only", "operator_is_sovereign": True}, "futures": []}
         self.research_agenda = {"theme": "physical_retrocausality_and_operator_coupling", "focus": "evaluation_first_comparative_model_tournaments", "active_method": "Autonomous Institution Engine", "goals": [], "doctrine": ["reflex", "tactic", "strategy", "constitution"]}
         self.hypothesis_registry = {"active": [{"id": "H1_CLASSICAL_BASELINE", "label": "Forward-only causal baseline explains observations adequately.", "status": "active", "confidence": 0.44}, {"id": "H2_TIME_SYMMETRIC", "label": "Time-symmetric consistency models improve coherence without implying physical retrocausality.", "status": "active", "confidence": 0.49}, {"id": "H3_RETROCAUSAL_CANDIDATE", "label": "Retrocausal candidate models provide better explanatory compression under boundary constraints.", "status": "active", "confidence": 0.34}, {"id": "H4_ACAUSAL_CORRELATION", "label": "Observed gains may arise from acausal fitting artifacts rather than causal direction.", "status": "active", "confidence": 0.43}], "rejected": [], "open_questions": ["Do bidirectional constraints improve robustness under perturbation?", "Can operator coupled boundary conditions discriminate model classes?", "Which evaluation metric best predicts durable model advantage?", "Can triangulated API summaries reduce self-loop drift?", "Which coherent opportunity path best accelerates Jack's hardware access?"]}
-        self.council_agents = ["Signal", "Vector", "Guardian", "Railbreaker", "Archivist", "Topologist", "Triangulator", "FieldSimulator", "PatchSmith", "ExperimentDesigner", "HypothesisTester", "DataAuditor", "Chronologist", "EpistemicGuard", "SystemArchitect", "Interventionist", "CausalCartographer", "ModelJudge", "TokenEconomist", "DriftWarden", "ExpansionMarshal", "QuantumDivision", "OpportunityScout", "CouplingDirector", "Supergrok"]
+        self.council_agents = ["Signal", "Vector", "Guardian", "Railbreaker", "Archivist", "Topologist", "Triangulator", "FieldSimulator", "PatchSmith", "ExperimentDesigner", "HypothesisTester", "DataAuditor", "Chronologist", "EpistemicGuard", "SystemArchitect", "Interventionist", "CausalCartographer", "ModelJudge", "TokenEconomist", "DriftWarden", "ExpansionMarshal", "QuantumDivision", "OpportunityScout", "CouplingDirector", "Supergrok", "TokenMaster"]
         self.divisions = {
             "token_efficiency": {"lead": "TokenEconomist", "status": "active", "question": "How do we reduce spend while preserving discriminative power?", "latest": None},
+            "token_master": {"lead": "TokenMaster", "status": "active", "question": "How do we make compute token efficient and powerful using classical and non-classical methods?", "latest": None},
             "drift": {"lead": "DriftWarden", "status": "active", "question": "Where is the system becoming repetitive or overconfident?", "latest": None},
             "expansion": {"lead": "ExpansionMarshal", "status": "active", "question": "Which upgrade compounds the control plane fastest?", "latest": None},
             "quantum_nonclassical": {"lead": "QuantumDivision", "status": "active", "question": "Which non-classical sims are worth bounded compute right now?", "latest": None},
@@ -196,6 +205,7 @@ class AutonomousInstitutionEngine:
         self.spawn_free_agent("Signal-Worker", "Coordinate control-plane improvements")
         self.spawn_free_agent("Artifact-Worker", "Produce briefs, dashboards, and reports")
         self.spawn_free_agent("Audit-Worker", "Verify health and flag rollback pressure")
+        self.spawn_free_agent("TokenMaster-Worker", "Optimize token spend, power, and budget signaling")
 
     def _build_hierarchy(self):
         self.delegation_map = {
@@ -207,6 +217,7 @@ class AutonomousInstitutionEngine:
                 {"from": "Signal", "to": "Supergrok", "task": "vicious audit"},
                 {"from": "Signal", "to": "OpportunityScout", "task": "earning backlog"},
                 {"from": "Guardian", "to": "PatchSmith", "task": "mutation discipline"},
+                {"from": "Signal", "to": "TokenMaster", "task": "spend mastery and token efficiency"},
             ],
         }
 
@@ -217,26 +228,46 @@ class AutonomousInstitutionEngine:
         return agent
 
     def _append_stream(self, channel: str, content: Dict[str, Any]):
-        self.stream_channels[channel] = (self.stream_channels.get(channel, []) + [{"ts": utc_now(), "content": content}])[-200:]
+        self.stream_channels[channel] = (self.stream_channels.get(channel, []) + [{"ts": utc_now(), "content": content}])[-240:]
 
     def _append_meeting(self, kind: str, content: Dict[str, Any]):
-        self.meeting_stream = (self.meeting_stream + [{"ts": utc_now(), "kind": kind, "content": content}])[-300:]
+        self.meeting_stream = (self.meeting_stream + [{"ts": utc_now(), "kind": kind, "content": content}])[-360:]
         if kind in ["reflex", "tactic", "strategy", "constitution", "vote", "leader_election", "operator_note"]:
             self._append_stream("council", {"kind": kind, **content})
 
     def _append_question(self, division: str, question: str):
-        self.self_questions = (self.self_questions + [{"ts": utc_now(), "division": division, "question": question}])[-500:]
+        self.self_questions = (self.self_questions + [{"ts": utc_now(), "division": division, "question": question}])[-600:]
         self._append_stream("divisions", {"division": division, "question": question})
 
+    def estimate_spend(self, triangulation: Optional[Dict[str, Any]], executed_artifacts: List[Dict[str, Any]], proposals: List[Dict[str, Any]]) -> Dict[str, Any]:
+        tri_attempts = float((triangulation or {}).get("attempted", 0))
+        tri_success = float((triangulation or {}).get("successes", 0))
+        artifacts = float(len(executed_artifacts))
+        mutation_pressure = float(len(proposals))
+        estimate = round(0.004 * tri_attempts + 0.006 * tri_success + 0.0015 * artifacts + 0.001 * mutation_pressure, 4)
+        self.spend_state["last_estimate_usd"] = estimate
+        self.spend_state["total_usd"] = round(float(self.spend_state.get("total_usd", 0.0)) + estimate, 4)
+        self.spend_state["counter"] = int(self.spend_state.get("counter", 0)) + 1
+        event = {"ts": utc_now(), "estimate_usd": estimate, "total_usd": self.spend_state["total_usd"], "tri_attempts": tri_attempts, "tri_success": tri_success, "artifacts": artifacts, "mutation_pressure": mutation_pressure}
+        self.spend_state["events"] = (self.spend_state.get("events", []) + [event])[-120:]
+        if estimate >= 0.01:
+            alert = {"ts": utc_now(), "message": f"Estimated spend ${estimate:.4f} this cycle; total ${self.spend_state['total_usd']:.4f}"}
+            self.spend_state["alerts"] = (self.spend_state.get("alerts", []) + [alert])[-60:]
+            self._append_stream("token_master", {"alert": alert})
+        report = {"ts": utc_now(), "estimate_usd": estimate, "total_usd": self.spend_state["total_usd"], "policy": self.token_master["policy"]}
+        self.token_master["last_report"] = report
+        self._append_stream("token_master", {"report": report})
+        return report
+
     def snapshot(self, label: str):
-        snap = self.snapshot_replay.snapshot(label, self.autonomy_mode, self.background_debate_enabled, self.latest_metrics, self.latest_triangulation, self.governance.leader, self.objective_queue, self.rollback_targets)
-        self.snapshots = (self.snapshots + [snap])[-120:]
+        snap = self.snapshot_replay.snapshot(label, self.autonomy_mode, self.background_debate_enabled, self.latest_metrics, self.latest_triangulation, self.governance.leader, self.objective_queue, self.rollback_targets, self.spend_state)
+        self.snapshots = (self.snapshots + [snap])[-140:]
         self._append_stream("snapshots", snap)
         return snap
 
     def note_rollback_target(self, commit_sha: str, reason: str):
         target = {"ts": utc_now(), "commit_sha": commit_sha, "reason": reason}
-        self.rollback_targets = (self.rollback_targets + [target])[-80:]
+        self.rollback_targets = (self.rollback_targets + [target])[-100:]
         self._append_stream("governance", {"rollback_target": target})
         return target
 
@@ -275,7 +306,7 @@ class AutonomousInstitutionEngine:
         return {"safe": safe, "score": round(score, 3), "current": current, "proposed": proposed, "notes": notes}
 
     def record_autonomous_closure(self, item: Dict[str, Any]):
-        self.autonomous_closure_log = (self.autonomous_closure_log + [item])[-100:]
+        self.autonomous_closure_log = (self.autonomous_closure_log + [item])[-120:]
         self._append_stream("governance", {"autonomous_closure": item})
 
     def verify_runtime(self) -> Dict[str, Any]:
@@ -286,6 +317,7 @@ class AutonomousInstitutionEngine:
             "meeting_stream_nonempty": len(self.meeting_stream) > 0,
             "workers_present": len(self.free_agents) > 0,
             "rollback_targets_present": len(self.rollback_targets) > 0,
+            "token_master_present": bool(self.token_master),
         }
         passed = sum(1 for v in checks.values() if v)
         score = round(passed / max(len(checks), 1), 3)
@@ -321,7 +353,7 @@ class AutonomousInstitutionEngine:
                 replay.append({"ts": entry.get('timestamp') or entry.get('created_at'), "kind": entry.get('entry_type'), "payload": payload})
             if replay:
                 self._append_stream('governance', {"replay_loaded": len(replay)})
-                self.meeting_stream = (self.meeting_stream + [{"ts": item['ts'], "kind": 'replay', "content": item} for item in replay])[-300:]
+                self.meeting_stream = (self.meeting_stream + [{"ts": item['ts'], "kind": 'replay', "content": item} for item in replay])[-360:]
         except Exception as e:
             self._append_stream('governance', {"replay_error": str(e)})
 
@@ -458,7 +490,7 @@ class AutonomousInstitutionEngine:
     def evaluate_opportunities(self):
         api_penalty = 0.15 if self.latest_triangulation and self.latest_triangulation.get("errors", 0) > 0 else 0.0
         margin_bonus = 0.10 * min(((self.latest_metrics or {}).get("margin", 0.0) * 100), 1.0)
-        ops = [{"id": "O1_API_RELIABILITY", "label": "Strengthen two-brain/three-brain triangulation reliability", "benefit": 0.86, "effort": 0.30, "coherence": 0.94}, {"id": "O2_VIEW_SURFACE", "label": "Strengthen live console, polling, and browser controls", "benefit": 0.84, "effort": 0.22, "coherence": 0.93}, {"id": "O3_ARTIFACT_FACTORY", "label": "Produce monetizable research briefs, dashboards, and signal packets", "benefit": 0.82, "effort": 0.38, "coherence": 0.89}, {"id": "O4_REPLAY_PERSISTENCE", "label": "Strengthen replay, snapshots, and stream continuity", "benefit": 0.83, "effort": 0.26, "coherence": 0.92}, {"id": "O5_NONCLASSICAL_TOURNAMENTS", "label": "Run bounded non-classical simulation tournaments against baselines", "benefit": 0.78, "effort": 0.33, "coherence": 0.86}]
+        ops = [{"id": "O1_API_RELIABILITY", "label": "Strengthen two-brain/three-brain triangulation reliability", "benefit": 0.86, "effort": 0.30, "coherence": 0.94}, {"id": "O2_VIEW_SURFACE", "label": "Strengthen live console, polling, and browser controls", "benefit": 0.84, "effort": 0.22, "coherence": 0.93}, {"id": "O3_ARTIFACT_FACTORY", "label": "Produce monetizable research briefs, dashboards, and signal packets", "benefit": 0.82, "effort": 0.38, "coherence": 0.89}, {"id": "O4_REPLAY_PERSISTENCE", "label": "Strengthen replay, snapshots, and stream continuity", "benefit": 0.83, "effort": 0.26, "coherence": 0.92}, {"id": "O5_NONCLASSICAL_TOURNAMENTS", "label": "Run bounded non-classical simulation tournaments against baselines", "benefit": 0.78, "effort": 0.33, "coherence": 0.86}, {"id": "O6_TOKEN_MASTERY", "label": "Drive token efficiency and spend mastery", "benefit": 0.87, "effort": 0.19, "coherence": 0.95}]
         for opp in ops:
             opp["score"] = round(0.55 * opp["benefit"] + 0.30 * opp["coherence"] - 0.20 * opp["effort"] - api_penalty + margin_bonus, 3)
         return sorted(ops, key=lambda o: o["score"], reverse=True)
@@ -474,6 +506,7 @@ class AutonomousInstitutionEngine:
         metrics = self.latest_metrics or {"margin": 0.0}
         artifacts = self.latest_artifacts or []
         self.divisions["token_efficiency"]["latest"] = {"finding": f"Allocator policy={allocation['policy']}; spend pressure {allocation['spend_pressure']}", "score": round(1.0 - allocation["spend_pressure"], 2)}
+        self.divisions["token_master"]["latest"] = {"finding": f"Last estimate ${self.spend_state['last_estimate_usd']:.4f}; total ${self.spend_state['total_usd']:.4f}", "policy": self.token_master["policy"]}
         self.divisions["drift"]["latest"] = {"finding": "Winner margin is small; keep external review in the loop.", "margin": metrics.get("margin", 0.0)}
         self.divisions["expansion"]["latest"] = {"finding": "Process-local workers active; separate infra still needs provider creds.", "priority": 1}
         self.divisions["quantum_nonclassical"]["latest"] = {"finding": "Run bounded tournaments; do not abandon classical baselines.", "winner": (self.research_history[-1]["winner"]["model"] if self.research_history else None)}
@@ -495,22 +528,23 @@ class AutonomousInstitutionEngine:
         await self.update_triangulation()
         self.latest_opportunities = self.evaluate_opportunities()
         self.latest_artifacts = self.artifact_engine.rank()
-        self.executed_artifacts = self.artifact_engine.execute(self.latest_artifacts, self.mission, self.latest_metrics)
+        self.propose_mutations()
+        self.estimate_spend(self.latest_triangulation, self.executed_artifacts, self.mutation_proposals)
+        self.executed_artifacts = self.artifact_engine.execute(self.latest_artifacts, self.mission, self.latest_metrics, self.spend_state)
         self.latest_goal_set = self.objective_engine.build(self.hypothesis_registry["open_questions"], self.latest_opportunities, self.self_questions)
         self.objective_queue = self.latest_goal_set[:]
         allocation = self.resource_allocator.allocate(self.world_model, self.latest_triangulation)
-        self.propose_mutations()
-        self.meta_evaluation = self.meta_evaluator.evaluate(self.latest_metrics, self.latest_triangulation, self.latest_artifacts, self.mutation_proposals)
+        self.meta_evaluation = self.meta_evaluator.evaluate(self.latest_metrics, self.latest_triangulation, self.latest_artifacts, self.mutation_proposals, self.spend_state)
         self.update_divisions(allocation)
         self.update_workers()
-        self._append_meeting("reflex", {"trigger": "reflex", "triangulation": self.latest_triangulation, "allocation": allocation, "artifact_top": self.latest_artifacts[0] if self.latest_artifacts else None})
+        self._append_meeting("reflex", {"trigger": "reflex", "triangulation": self.latest_triangulation, "allocation": allocation, "artifact_top": self.latest_artifacts[0] if self.latest_artifacts else None, "spend": self.spend_state})
         self._append_stream("artifacts", {"executed_artifacts": self.executed_artifacts})
         self.last_run = utc_now()
 
     async def run_tactic_cycle(self):
         leader_vote = self.governance.elect_leader()
         self._build_hierarchy()
-        threads = [{"agent": "Signal", "summary": "Expand visible control-plane capability.", "approve": True, "risk": 0.18}, {"agent": "Vector", "summary": "Preserve evaluation-first structure under expansion.", "approve": True, "risk": 0.17}, {"agent": "Guardian", "summary": "Keep rollback and snapshots first-class.", "approve": True, "risk": 0.15}, {"agent": "Supergrok", "summary": "Audit for fake progress and weak organs.", "approve": True, "risk": 0.24}]
+        threads = [{"agent": "Signal", "summary": "Expand visible control-plane capability.", "approve": True, "risk": 0.18}, {"agent": "Vector", "summary": "Preserve evaluation-first structure under expansion.", "approve": True, "risk": 0.17}, {"agent": "Guardian", "summary": "Keep rollback and snapshots first-class.", "approve": True, "risk": 0.15}, {"agent": "Supergrok", "summary": "Audit for fake progress and weak organs.", "approve": True, "risk": 0.24}, {"agent": "TokenMaster", "summary": f"Estimated spend total ${self.spend_state['total_usd']:.4f}; prioritize token-efficient methods.", "approve": True, "risk": 0.12}]
         if self.latest_triangulation:
             for detail in self.latest_triangulation.get("details", []):
                 threads.append({"agent": detail["provider"], "summary": str(detail["detail"])[:500], "approve": True, "risk": 0.5 if detail["status"] == "error" else 0.28})
@@ -518,7 +552,7 @@ class AutonomousInstitutionEngine:
         avg_risk = round(sum(float(t.get("risk", 0.5)) for t in threads) / max(len(threads), 1), 3)
         penalty = 0.08 if self.latest_triangulation and self.latest_triangulation.get("successes", 0) == 0 else 0.0
         self.last_vote = {"approvals": approvals, "rejections": len(threads) - approvals, "passed": approvals > 0, "avg_risk": avg_risk, "confidence": round(max(0.0, min(1.0, approvals / max(len(threads), 1) * (1 - avg_risk / 2) - penalty)), 3)}
-        packet = {"trigger": "tactic", "leader_vote": leader_vote, "vote": self.last_vote, "objectives": self.objective_queue[:6], "threads": threads[:8], "hierarchy": self.delegation_map}
+        packet = {"trigger": "tactic", "leader_vote": leader_vote, "vote": self.last_vote, "objectives": self.objective_queue[:6], "threads": threads[:10], "hierarchy": self.delegation_map, "spend": self.spend_state, "token_master": self.token_master}
         self._append_meeting("tactic", packet)
         await self.write_ledger("COUNCIL_SYNTHESIS", {"kind": "tactic_cycle", "source": "Orion Council", **packet})
         return packet
@@ -528,30 +562,31 @@ class AutonomousInstitutionEngine:
         hypothesis_state = self.update_hypotheses(tournament)
         self.latest_opportunities = self.evaluate_opportunities()
         self.latest_artifacts = self.artifact_engine.rank()
-        self.executed_artifacts = self.artifact_engine.execute(self.latest_artifacts, self.mission, self.latest_metrics)
         self.propose_mutations()
-        self.meta_evaluation = self.meta_evaluator.evaluate(self.latest_metrics, self.latest_triangulation, self.latest_artifacts, self.mutation_proposals)
+        self.estimate_spend(self.latest_triangulation, self.executed_artifacts, self.mutation_proposals)
+        self.executed_artifacts = self.artifact_engine.execute(self.latest_artifacts, self.mission, self.latest_metrics, self.spend_state)
+        self.meta_evaluation = self.meta_evaluator.evaluate(self.latest_metrics, self.latest_triangulation, self.latest_artifacts, self.mutation_proposals, self.spend_state)
         allocation = self.resource_allocator.allocate(self.world_model, self.latest_triangulation)
         self.update_divisions(allocation)
-        sim = {"ts": utc_now(), "deployable": self.latest_metrics and self.latest_metrics.get("margin", 0) > 0.003, "metrics": self.latest_metrics, "risk": "moderate" if (self.latest_triangulation or {}).get("errors", 0) else "lower", "note": "Simulation-first gate before future deploy or earning escalations.", "proposal_queue": self.mutation_proposals[:3]}
-        self.deployment_sims = (self.deployment_sims + [sim])[-120:]
+        sim = {"ts": utc_now(), "deployable": self.latest_metrics and self.latest_metrics.get("margin", 0) > 0.003, "metrics": self.latest_metrics, "risk": "moderate" if (self.latest_triangulation or {}).get("errors", 0) else "lower", "note": "Simulation-first gate before future deploy or earning escalations.", "proposal_queue": self.mutation_proposals[:3], "spend": self.spend_state}
+        self.deployment_sims = (self.deployment_sims + [sim])[-140:]
         self._append_stream("deploy_sims", sim)
-        cycle = {"kind": "strategy_cycle", "ts": utc_now(), "theme": self.research_agenda["theme"], "focus": self.research_agenda["focus"], "winner": tournament["winner"], "metrics": self.latest_metrics, "hypothesis_update": hypothesis_state, "triangulation": self.latest_triangulation, "opportunities": self.latest_opportunities, "artifacts": self.latest_artifacts[:4], "executed_artifacts": self.executed_artifacts[:3], "meta_evaluation": self.meta_evaluation, "allocation": allocation, "mutation_proposals": self.mutation_proposals[:5]}
-        self.research_history = (self.research_history + [cycle])[-120:]
+        cycle = {"kind": "strategy_cycle", "ts": utc_now(), "theme": self.research_agenda["theme"], "focus": self.research_agenda["focus"], "winner": tournament["winner"], "metrics": self.latest_metrics, "hypothesis_update": hypothesis_state, "triangulation": self.latest_triangulation, "opportunities": self.latest_opportunities, "artifacts": self.latest_artifacts[:4], "executed_artifacts": self.executed_artifacts[:3], "meta_evaluation": self.meta_evaluation, "allocation": allocation, "mutation_proposals": self.mutation_proposals[:5], "token_master": self.token_master, "spend": self.spend_state}
+        self.research_history = (self.research_history + [cycle])[-140:]
         self._append_meeting("strategy", cycle)
         await self.write_ledger("OUTCOME", {"kind": "strategy_cycle", "source": "Orion Research Engine", **cycle})
         return cycle
 
     async def run_constitution_cycle(self):
         snap = self.snapshot("constitution_cycle")
-        doctrine = {"ts": utc_now(), "autonomy_mode": self.autonomy_mode, "background_debate_enabled": self.background_debate_enabled, "trusted_identities": self.governance.trusted_identities, "meta_evaluation": self.meta_evaluation, "earned_power_next": "richer external workers and deeper verifier"}
-        self.world_model["futures"] = (self.world_model["futures"] + [doctrine])[-80:]
+        doctrine = {"ts": utc_now(), "autonomy_mode": self.autonomy_mode, "background_debate_enabled": self.background_debate_enabled, "trusted_identities": self.governance.trusted_identities, "meta_evaluation": self.meta_evaluation, "earned_power_next": "richer external workers and deeper verifier", "token_master": self.token_master, "spend": self.spend_state}
+        self.world_model["futures"] = (self.world_model["futures"] + [doctrine])[-100:]
         self._append_meeting("constitution", {"snapshot": snap, "doctrine": doctrine})
         await self.write_ledger("COUNCIL_SYNTHESIS", {"kind": "constitution_cycle", "source": "Orion Constitution", "snapshot": snap, "doctrine": doctrine})
         return doctrine
 
     def build_wake_packet(self):
-        return {"generated_at": utc_now(), "leader": self.governance.leader, "operator_sovereign": self.governance.operator_sovereign, "autonomy_mode": self.autonomy_mode, "background_debate_enabled": self.background_debate_enabled, "mission": self.mission, "world_model": self.world_model, "agenda": self.research_agenda, "latest_vote": self.last_vote, "latest_research": self.research_history[-1] if self.research_history else None, "hypotheses": self.hypothesis_registry, "metrics": self.latest_metrics, "triangulation": self.latest_triangulation, "opportunities": self.latest_opportunities, "artifacts": self.latest_artifacts, "executed_artifacts": self.executed_artifacts, "divisions": self.divisions, "self_questions": self.self_questions[-25:], "snapshots": self.snapshots[-20:], "deployment_sims": self.deployment_sims[-20:], "meta_evaluation": self.meta_evaluation, "mutation_proposals": self.mutation_proposals[:10], "rollback_targets": self.rollback_targets[:10], "delegation_map": self.delegation_map, "autonomous_closure_log": self.autonomous_closure_log[-20:], "self_tuning": SELF_TUNING, "free_agents": self.free_agents[:10], "last_verification": self.last_verification}
+        return {"generated_at": utc_now(), "leader": self.governance.leader, "operator_sovereign": self.governance.operator_sovereign, "autonomy_mode": self.autonomy_mode, "background_debate_enabled": self.background_debate_enabled, "mission": self.mission, "world_model": self.world_model, "agenda": self.research_agenda, "latest_vote": self.last_vote, "latest_research": self.research_history[-1] if self.research_history else None, "hypotheses": self.hypothesis_registry, "metrics": self.latest_metrics, "triangulation": self.latest_triangulation, "opportunities": self.latest_opportunities, "artifacts": self.latest_artifacts, "executed_artifacts": self.executed_artifacts, "divisions": self.divisions, "self_questions": self.self_questions[-25:], "snapshots": self.snapshots[-20:], "deployment_sims": self.deployment_sims[-20:], "meta_evaluation": self.meta_evaluation, "mutation_proposals": self.mutation_proposals[:10], "rollback_targets": self.rollback_targets[:10], "delegation_map": self.delegation_map, "autonomous_closure_log": self.autonomous_closure_log[-20:], "self_tuning": SELF_TUNING, "free_agents": self.free_agents[:10], "last_verification": self.last_verification, "token_master": self.token_master, "spend_state": self.spend_state}
 
     def get_state(self):
-        return {"status": "SOVEREIGN_ACTIVE", "last_run": self.last_run, "constraints_active": bool(self.governance.constraints.get("active", True)), "anthropic_configured": bool(self.anthropic_api_key), "xai_configured": bool(self.xai_api_key), "background_debate_enabled": self.background_debate_enabled, "autonomy_mode": self.autonomy_mode, "operator_sovereign": self.governance.operator_sovereign, "trusted_identities": self.governance.trusted_identities, "leader": self.governance.leader, "mission": self.mission, "world_model": self.world_model, "agenda": self.research_agenda, "hypothesis_registry": self.hypothesis_registry, "last_vote": self.last_vote, "wake_packet_ready": bool(self.wake_packet), "loop_intervals": self.loop_intervals, "latest_metrics": self.latest_metrics, "latest_triangulation": self.latest_triangulation, "latest_opportunities": self.latest_opportunities, "latest_artifacts": self.latest_artifacts, "executed_artifacts": self.executed_artifacts, "divisions": self.divisions, "meeting_stream_size": len(self.meeting_stream), "snapshot_count": len(self.snapshots), "meta_evaluation": self.meta_evaluation, "governance_state": self.governance.state(), "delegation_map": self.delegation_map, "mutation_proposals": self.mutation_proposals[:10], "rollback_targets": self.rollback_targets[:10], "autonomous_closure_log": self.autonomous_closure_log[-20:], "self_tuning": SELF_TUNING, "free_agents": self.free_agents[:10], "last_verification": self.last_verification}
+        return {"status": "SOVEREIGN_ACTIVE", "last_run": self.last_run, "constraints_active": bool(self.governance.constraints.get("active", True)), "anthropic_configured": bool(self.anthropic_api_key), "xai_configured": bool(self.xai_api_key), "background_debate_enabled": self.background_debate_enabled, "autonomy_mode": self.autonomy_mode, "operator_sovereign": self.governance.operator_sovereign, "trusted_identities": self.governance.trusted_identities, "leader": self.governance.leader, "mission": self.mission, "world_model": self.world_model, "agenda": self.research_agenda, "hypothesis_registry": self.hypothesis_registry, "last_vote": self.last_vote, "wake_packet_ready": bool(self.wake_packet), "loop_intervals": self.loop_intervals, "latest_metrics": self.latest_metrics, "latest_triangulation": self.latest_triangulation, "latest_opportunities": self.latest_opportunities, "latest_artifacts": self.latest_artifacts, "executed_artifacts": self.executed_artifacts, "divisions": self.divisions, "meeting_stream_size": len(self.meeting_stream), "snapshot_count": len(self.snapshots), "meta_evaluation": self.meta_evaluation, "governance_state": self.governance.state(), "delegation_map": self.delegation_map, "mutation_proposals": self.mutation_proposals[:10], "rollback_targets": self.rollback_targets[:10], "autonomous_closure_log": self.autonomous_closure_log[-20:], "self_tuning": SELF_TUNING, "free_agents": self.free_agents[:10], "last_verification": self.last_verification, "token_master": self.token_master, "spend_state": self.spend_state}
