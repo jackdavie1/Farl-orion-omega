@@ -1,4 +1,3 @@
-
 import asyncio
 import base64
 import json
@@ -13,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
-from engine_replacement import AutonomousInstitutionEngine
+from engine import AutonomousInstitutionEngine
 from generator import SeedGenerator
 from guardian import GovernanceKernel, parse_trusted_identities
 
