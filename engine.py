@@ -21,7 +21,7 @@ SELF_TUNING = {
     "proposal_limit": 3,
     "reflex_interval": 30,
     "strategy_interval": 300,
-    "tactic_interval": 120
+    "tactic_interval": 120,
 }
 # AUTONOMOUS_SELF_TUNING_END
 
@@ -35,13 +35,15 @@ class ObjectiveEngine:
             sources.append(("self_question", q["question"]))
         goals = []
         for idx, (kind, text) in enumerate(sources[:10], start=1):
-            goals.append({
-                "id": f"G{idx}",
-                "kind": kind,
-                "goal": text,
-                "priority": round(max(0.4, 1.0 - 0.06 * (idx - 1)), 2),
-                "next_experiment": f"Advance '{text[:72]}' and measure effect on visibility, metrics, or delivery.",
-            })
+            goals.append(
+                {
+                    "id": f"G{idx}",
+                    "kind": kind,
+                    "goal": text,
+                    "priority": round(max(0.4, 1.0 - 0.06 * (idx - 1)), 2),
+                    "next_experiment": f"Advance '{text[:72]}' and measure effect on visibility, metrics, or delivery.",
+                }
+            )
         return goals
 
 
@@ -110,6 +112,7 @@ class MetaEvaluator:
         observer_reports: List[Dict[str, Any]],
         mutation_backlog: List[Dict[str, Any]],
         regression_history: List[Dict[str, Any]],
+        execution_queue: List[Dict[str, Any]],
     ) -> Dict[str, Any]:
         metrics = metrics or {}
         triangulation = triangulation or {}
@@ -123,10 +126,11 @@ class MetaEvaluator:
             "observer_reports": len(observer_reports),
             "mutation_backlog": len(mutation_backlog),
             "regressions": len(regression_history),
+            "execution_queue": len(execution_queue),
             "spend_total_usd": round(float(spend_state.get("total_usd", 0.0)), 4),
             "ui_score": ui_critique.get("score"),
             "question": "What should this agent become next?",
-            "answer": "A visible, persistent, budget-aware product organism that keeps redesign threads alive until operator-facing defects are gone and can mutate broader modules through bounded bundles.",
+            "answer": "A visible, persistent, budget-aware product organism that keeps redesign threads alive until operator-facing defects are gone, can model richer multi-file bundles, and can hand them cleanly to external executors when in-process mutation is too narrow.",
         }
 
 
@@ -146,6 +150,8 @@ class SnapshotReplay:
         failure_registry: List[Dict[str, Any]],
         mutation_backlog: List[Dict[str, Any]],
         regression_history: List[Dict[str, Any]],
+        execution_queue: List[Dict[str, Any]],
+        mutation_contracts: List[Dict[str, Any]],
     ) -> Dict[str, Any]:
         return {
             "ts": utc_now(),
@@ -163,6 +169,8 @@ class SnapshotReplay:
             "failure_registry": failure_registry[:5],
             "mutation_backlog": mutation_backlog[:5],
             "regression_history": regression_history[:5],
+            "execution_queue": execution_queue[:5],
+            "mutation_contracts": mutation_contracts[:5],
         }
 
 
@@ -227,10 +235,54 @@ class AutonomousInstitutionEngine:
         self.mutation_backlog: List[Dict[str, Any]] = []
         self.regression_history: List[Dict[str, Any]] = []
         self.module_mutation_policy: Dict[str, Any] = {
-            "mutable_files": ["app.py", "engine.py"],
-            "mutable_scopes": ["view_surface", "runtime_state", "observer_logic", "evaluation_logic", "scheduler_logic"],
-            "high_confidence_required_for": ["engine.py"],
+            "mutable_files": ["app.py", "engine.py", "guardian.py", "generator.py"],
+            "in_process_mutable_files": ["app.py", "engine.py"],
+            "external_handoff_files": ["guardian.py", "generator.py"],
+            "mutable_scopes": [
+                "view_surface",
+                "runtime_state",
+                "observer_logic",
+                "evaluation_logic",
+                "scheduler_logic",
+                "governance_logic",
+                "provider_routing",
+            ],
+            "high_confidence_required_for": ["engine.py", "guardian.py", "generator.py"],
             "always_require_rollback_anchor": True,
+        }
+        self.module_registry: Dict[str, Dict[str, Any]] = {
+            "app.py": {
+                "role": "control_room_surface_and_closure",
+                "dependencies": ["engine.py", "guardian.py"],
+                "supports_in_process_execution": True,
+                "acceptance_focus": ["rendered_view", "operator_reply_visibility", "closure_and_rollback"],
+            },
+            "engine.py": {
+                "role": "planner_memory_bundle_logic",
+                "dependencies": ["generator.py", "guardian.py"],
+                "supports_in_process_execution": True,
+                "acceptance_focus": ["planner_persistence", "bundle_quality", "wake_packet_consistency"],
+            },
+            "guardian.py": {
+                "role": "governance_and_trust_kernel",
+                "dependencies": [],
+                "supports_in_process_execution": False,
+                "acceptance_focus": ["trust_identity_integrity", "vote_integrity", "constraint_integrity"],
+            },
+            "generator.py": {
+                "role": "external_model_routing_and_patch_generation",
+                "dependencies": [],
+                "supports_in_process_execution": False,
+                "acceptance_focus": ["provider_health", "plan_quality", "triangulation_consistency"],
+            },
+        }
+        self.mutation_contracts: List[Dict[str, Any]] = []
+        self.execution_queue: List[Dict[str, Any]] = []
+        self.external_executor_state: Dict[str, Any] = {
+            "queued_count": 0,
+            "last_packet": None,
+            "last_dispatch": None,
+            "conceptual_executor": "Orion / external APK workers",
         }
         self.rollback_targets: List[Dict[str, Any]] = []
         self.delegation_map: Dict[str, Any] = {}
@@ -335,6 +387,7 @@ class AutonomousInstitutionEngine:
             ("Observer-Worker", "Generate operator-facing defect reports and evidence"),
             ("Builder-Worker", "Drive full-file redesign proposals from open threads"),
             ("Deploy-Worker", "Watch bounded deploy conditions and closure state"),
+            ("ExternalHandoff-Worker", "Prepare clean bundle packets for Orion and external executors"),
         ]:
             self.spawn_free_agent(name, mission)
 
@@ -384,12 +437,105 @@ class AutonomousInstitutionEngine:
 
     def infer_module_targets(self, objective: str, severity: str) -> List[str]:
         objective_l = objective.lower()
-        targets = []
-        if "/view" in objective_l or "control room" in objective_l or "ui" in objective_l or "feed" in objective_l or "chat" in objective_l:
+        targets: List[str] = []
+        if any(k in objective_l for k in ["/view", "control room", "ui", "feed", "chat", "console", "rendered", "operator-facing"]):
             targets.append("app.py")
-        if "runtime" in objective_l or "observer" in objective_l or "backlog" in objective_l or severity == "high" or "self mutate" in objective_l or "builder" in objective_l:
+        if any(k in objective_l for k in ["runtime", "observer", "backlog", "thread", "self mutate", "builder", "bundle", "planner", "memory", "mutation"]):
             targets.append("engine.py")
-        return targets or ["app.py"]
+        if any(k in objective_l for k in ["governance", "constraint", "trusted identities", "leader election", "rollback policy"]):
+            targets.append("guardian.py")
+        if any(k in objective_l for k in ["provider", "grok", "anthropic", "generator", "routing", "triangulation", "api"]):
+            targets.append("generator.py")
+        if severity == "high" and "engine.py" not in targets:
+            targets.append("engine.py")
+        return list(dict.fromkeys(targets or ["app.py"]))
+
+    def bundle_supported_in_process(self, bundle: Dict[str, Any]) -> bool:
+        targets = bundle.get("targets", [])
+        supported = set(self.module_mutation_policy.get("in_process_mutable_files", []))
+        return all(t in supported for t in targets)
+
+    def build_file_intents(self, targets: List[str], objective: str) -> List[Dict[str, Any]]:
+        intents = []
+        for target in targets:
+            role = self.module_registry.get(target, {}).get("role", "unknown")
+            acceptance_focus = self.module_registry.get(target, {}).get("acceptance_focus", [])
+            intents.append({
+                "file": target,
+                "role": role,
+                "intent": f"Mutate {target} in service of: {objective}",
+                "acceptance_focus": acceptance_focus,
+            })
+        return intents
+
+    def build_acceptance_contract(self, targets: List[str], objective: str) -> Dict[str, Any]:
+        required_checks = ["runtime_verification", "rollback_anchor"]
+        if "app.py" in targets:
+            required_checks.extend(["rendered_view_fetch", "operator_reply_visibility"])
+        if "engine.py" in targets:
+            required_checks.extend(["wake_packet_consistency", "planner_state_consistency"])
+        if any(t in ["guardian.py", "generator.py"] for t in targets):
+            required_checks.extend(["external_executor_review", "post_handoff_ack"])
+        return {
+            "objective": objective,
+            "required_checks": list(dict.fromkeys(required_checks)),
+            "minimum_runtime_status": "healthy",
+            "minimum_rendered_score": 0.82 if "app.py" in targets else None,
+            "rollback_required": True,
+        }
+
+    def register_mutation_contract(self, bundle: Dict[str, Any]) -> Dict[str, Any]:
+        contract = {
+            "contract_id": f"contract-{bundle['bundle_id']}",
+            "bundle_id": bundle["bundle_id"],
+            "objective": bundle["objective"],
+            "targets": bundle["targets"],
+            "acceptance": bundle["acceptance_contract"],
+            "executor": "in_process" if bundle.get("supported_in_process") else "external_handoff",
+            "status": "registered",
+            "ts": utc_now(),
+        }
+        self.mutation_contracts = (self.mutation_contracts + [contract])[-120:]
+        self._append_stream("governance", {"mutation_contract": contract})
+        return contract
+
+    def mark_bundle_status(self, bundle_id: str, status: str, metadata: Optional[Dict[str, Any]] = None):
+        metadata = metadata or {}
+        for item in self.mutation_backlog:
+            if item.get("bundle_id") == bundle_id:
+                item["status"] = status
+                item["updated_at"] = utc_now()
+                item["status_meta"] = metadata
+        for item in self.mutation_contracts:
+            if item.get("bundle_id") == bundle_id:
+                item["status"] = status
+                item["updated_at"] = utc_now()
+                item["status_meta"] = metadata
+        self._append_stream("governance", {"bundle_status": {"bundle_id": bundle_id, "status": status, "meta": metadata}})
+
+    def queue_external_executor_bundle(self, bundle: Dict[str, Any], source: str, authorized_by: str) -> Dict[str, Any]:
+        packet = {
+            "packet_id": f"handoff-{bundle['bundle_id']}",
+            "bundle_id": bundle["bundle_id"],
+            "objective": bundle["objective"],
+            "targets": bundle["targets"],
+            "file_intents": bundle["file_intents"],
+            "acceptance_contract": bundle["acceptance_contract"],
+            "dependencies": bundle["dependencies"],
+            "source": source,
+            "authorized_by": authorized_by,
+            "handoff_to": self.external_executor_state.get("conceptual_executor"),
+            "status": "queued",
+            "ts": utc_now(),
+        }
+        self.execution_queue = (self.execution_queue + [packet])[-120:]
+        self.external_executor_state["queued_count"] = len(self.execution_queue)
+        self.external_executor_state["last_packet"] = packet
+        self.external_executor_state["last_dispatch"] = utc_now()
+        self.mark_bundle_status(bundle["bundle_id"], "queued_external", {"packet_id": packet["packet_id"]})
+        self._append_stream("workers", {"external_handoff_packet": packet})
+        self._append_stream("governance", {"external_handoff_packet": packet})
+        return packet
 
     def open_or_update_thread(
         self,
@@ -455,14 +601,19 @@ class AutonomousInstitutionEngine:
             objectives.append("make /view feel like a living private council room")
         if any(k in lowered for k in ["self mutate", "builder", "deploy", "engine", "app.py", "engine.py", "multi-file"]):
             objectives.append("broaden bounded multi-file builder execution across app.py and engine.py")
+        if any(k in lowered for k in ["guardian", "governance", "constraints", "trusted"]):
+            objectives.append("prepare broader governance-aware mutation bundles including guardian.py when justified")
+        if any(k in lowered for k in ["generator", "grok", "anthropic", "provider", "routing", "api"]):
+            objectives.append("prepare provider-routing bundle handoffs including generator.py when justified")
         if any(k in lowered for k in ["reply", "respond", "ignored", "answer me", "my input"]):
             objectives.append("make operator notes trigger immediate council response and debate")
         if not objectives:
             objectives.append("respond directly to operator intent and update active redesign thread")
         for obj in objectives:
-            self.open_or_update_thread(obj, "high" if "multi-file" in obj or "operator notes" in obj else "medium", {"from": "operator_note", "message": message}, module_hint=self.infer_module_targets(obj, "high"))
+            sev = "high" if any(x in obj for x in ["multi-file", "operator notes", "governance-aware", "provider-routing"]) else "medium"
+            self.open_or_update_thread(obj, sev, {"from": "operator_note", "message": message}, module_hint=self.infer_module_targets(obj, "high"))
         debate = [
-            ("JackAgent", "Operator signal received", f"Jack has spoken through the control room. The chamber will answer directly and keep the thread alive until the visible defect is reduced."),
+            ("JackAgent", "Operator signal received", "Jack has spoken through the control room. The chamber will answer directly and keep the thread alive until the visible defect is reduced."),
             ("Signal", "Council opening", f"We are treating the note as live mission input, not as passive logging. Objective extraction complete: {', '.join(objectives)}."),
             ("ObserverAgent", "Rendered product read", "The operator is reacting to the visible surface, which means the surface must become part of the truth criterion. We optimize what he can actually see."),
             ("InterfaceCritic", "UI critique", "The console must read like a living lab council in plain chapter language, not a debugger leaking raw structure."),
@@ -482,16 +633,31 @@ class AutonomousInstitutionEngine:
 
     def build_mutation_bundle(self, thread: Dict[str, Any]) -> Dict[str, Any]:
         targets = thread.get("module_targets") or self.infer_module_targets(thread.get("objective", ""), thread.get("severity", "medium"))
+        targets = list(dict.fromkeys(targets))
+        dependencies = list(dict.fromkeys([dep for t in targets for dep in self.module_registry.get(t, {}).get("dependencies", [])]))
+        targets_with_deps = list(dict.fromkeys(targets + dependencies))
+        supported_in_process = all(self.module_registry.get(t, {}).get("supports_in_process_execution", False) for t in targets)
+        strategy = "external_handoff_bundle" if not supported_in_process else "multi_file_replace" if len(targets) > 1 else "single_file_replace"
+        acceptance_contract = self.build_acceptance_contract(targets, thread["objective"])
+        file_intents = self.build_file_intents(targets, thread["objective"])
         bundle = {
             "bundle_id": f"bundle-{thread['thread_id']}-{len(thread.get('proposals', []))+1}",
             "thread_id": thread["thread_id"],
             "objective": thread["objective"],
             "targets": targets,
-            "strategy": "multi_file_replace" if len(targets) > 1 else "single_file_replace",
-            "confidence_required": 0.9 if "engine.py" in targets else 0.82,
+            "targets_with_dependencies": targets_with_deps,
+            "dependencies": dependencies,
+            "strategy": strategy,
+            "confidence_required": 0.9 if any(t in ["engine.py", "guardian.py", "generator.py"] for t in targets) else 0.82,
             "status": "planned",
+            "supported_in_process": supported_in_process,
+            "handoff_required": not supported_in_process,
+            "acceptance_contract": acceptance_contract,
+            "file_intents": file_intents,
+            "executor": "in_process" if supported_in_process else "external_handoff",
         }
         self.mutation_backlog = (self.mutation_backlog + [bundle])[-120:]
+        self.register_mutation_contract(bundle)
         self._append_stream("governance", {"mutation_bundle": bundle})
         return bundle
 
@@ -504,8 +670,18 @@ class AutonomousInstitutionEngine:
             "autonomy_visible": len(self.autonomous_closure_log) > 0 or bool(self.last_vote),
             "thread_persistence": len([t for t in self.redesign_threads if t.get("status") != "closed"]) >= 0,
             "backlog_exists": len(self.mutation_backlog) >= 0,
+            "execution_queue_visible": len(self.execution_queue) >= 0,
         }
-        weighted = 0.22 * float(checks["operator_note_visible"]) + 0.18 * float(checks["council_room_has_arguments"]) + 0.12 * float(checks["inbox_nonempty"]) + 0.12 * float(checks["workers_visible"]) + 0.14 * float(checks["autonomy_visible"]) + 0.11 * float(checks["thread_persistence"]) + 0.11 * float(checks["backlog_exists"])
+        weighted = (
+            0.18 * float(checks["operator_note_visible"]) +
+            0.16 * float(checks["council_room_has_arguments"]) +
+            0.12 * float(checks["inbox_nonempty"]) +
+            0.10 * float(checks["workers_visible"]) +
+            0.13 * float(checks["autonomy_visible"]) +
+            0.10 * float(checks["thread_persistence"]) +
+            0.10 * float(checks["backlog_exists"]) +
+            0.11 * float(checks["execution_queue_visible"])
+        )
         summary = "Council room still lacks strong visible aliveness and operator-response reflection." if weighted < 0.85 else "Council room is trending toward visible aliveness."
         severity = "high" if weighted < 0.6 else "medium" if weighted < 0.85 else "low"
         report = {"ts": utc_now(), "summary": summary, "severity": severity, "score": round(weighted, 3), "checks": checks}
@@ -521,7 +697,7 @@ class AutonomousInstitutionEngine:
 
     def build_patch_proposals_from_threads(self):
         proposals = []
-        for thread in [t for t in self.redesign_threads if t.get("status") != "closed"][:3]:
+        for thread in [t for t in self.redesign_threads if t.get("status") != "closed"][:4]:
             bundle = self.build_mutation_bundle(thread)
             proposal = {
                 "id": f"proposal-{thread['thread_id']}-{len(thread.get('proposals', []))+1}",
@@ -532,6 +708,8 @@ class AutonomousInstitutionEngine:
                 "reason": f"Current best score {thread.get('current_best_score', 0.0)} below target {thread.get('target_score', 0.85)}",
                 "status": "queued",
                 "confidence_required": bundle["confidence_required"],
+                "executor": bundle["executor"],
+                "handoff_required": bundle["handoff_required"],
             }
             proposals.append(proposal)
             self.update_thread_progress(thread["objective"], thread.get("current_best_score", 0.0), "builder_proposal_ready", proposal)
@@ -592,6 +770,13 @@ class AutonomousInstitutionEngine:
                 "message": f"{open_threads[0]['objective']} remains open with target score {open_threads[0]['target_score']} and current best {open_threads[0]['current_best_score']}.",
                 "priority": "high",
             })
+        if self.execution_queue:
+            inbox.append({
+                "from": "ExternalHandoff-Worker",
+                "subject": "External executor queue",
+                "message": f"{len(self.execution_queue)} richer bundle packet(s) are ready for Orion / external workers to pick up.",
+                "priority": "high",
+            })
         self.stream_channels["inbox"] = [{"ts": utc_now(), "content": item} for item in inbox][-60:]
         return inbox
 
@@ -601,7 +786,8 @@ class AutonomousInstitutionEngine:
         artifacts = float(len(executed_artifacts))
         mutation_pressure = float(len(proposals))
         thread_pressure = float(len([t for t in self.redesign_threads if t.get("status") != "closed"]))
-        estimate = round(0.004 * tri_attempts + 0.006 * tri_success + 0.0015 * artifacts + 0.001 * mutation_pressure + 0.0008 * thread_pressure, 4)
+        handoff_pressure = float(len(self.execution_queue))
+        estimate = round(0.004 * tri_attempts + 0.006 * tri_success + 0.0015 * artifacts + 0.001 * mutation_pressure + 0.0008 * thread_pressure + 0.0005 * handoff_pressure, 4)
         self.spend_state["last_estimate_usd"] = estimate
         self.spend_state["total_usd"] = round(float(self.spend_state.get("total_usd", 0.0)) + estimate, 4)
         self.spend_state["counter"] = int(self.spend_state.get("counter", 0)) + 1
@@ -614,6 +800,7 @@ class AutonomousInstitutionEngine:
             "artifacts": artifacts,
             "mutation_pressure": mutation_pressure,
             "thread_pressure": thread_pressure,
+            "handoff_pressure": handoff_pressure,
         }
         self.spend_state["events"] = (self.spend_state.get("events", []) + [event])[-120:]
         if estimate >= 0.01:
@@ -640,6 +827,8 @@ class AutonomousInstitutionEngine:
             self.failure_registry,
             self.mutation_backlog,
             self.regression_history,
+            self.execution_queue,
+            self.mutation_contracts,
         )
         self.snapshots = (self.snapshots + [snap])[-180:]
         self._append_stream("snapshots", snap)
@@ -701,6 +890,7 @@ class AutonomousInstitutionEngine:
             "inbox_present": len(self.stream_channels.get("inbox", [])) > 0,
             "threads_present": len(self.redesign_threads) >= 0,
             "backlog_present": len(self.mutation_backlog) >= 0,
+            "execution_queue_present": len(self.execution_queue) >= 0,
             "state_consistent": isinstance(self.module_mutation_policy.get("mutable_files"), list),
         }
         passed = sum(1 for v in checks.values() if v)
@@ -926,6 +1116,7 @@ class AutonomousInstitutionEngine:
             {"id": "O6_TOKEN_MASTERY", "label": "Drive token efficiency and spend mastery", "benefit": 0.87, "effort": 0.19, "coherence": 0.95},
             {"id": "O7_CHAT_CONTROL_ROOM", "label": "Make /view feel like a living private council room", "benefit": 0.92, "effort": 0.24, "coherence": 0.96},
             {"id": "O8_ORION_MUTATION", "label": "Broaden bounded self-mutation beyond view into runtime organs", "benefit": 0.85, "effort": 0.31, "coherence": 0.93},
+            {"id": "O9_EXTERNAL_HANDOFF", "label": "Prepare richer external bundle packets for Orion and APK workers", "benefit": 0.89, "effort": 0.25, "coherence": 0.95},
         ]
         for opp in ops:
             opp["score"] = round(0.55 * opp["benefit"] + 0.30 * opp["coherence"] - 0.20 * opp["effort"] - api_penalty + margin_bonus, 3)
@@ -946,6 +1137,7 @@ class AutonomousInstitutionEngine:
             "finding": (self.mutation_proposals[0]["reason"] if self.mutation_proposals else "No proposal ready."),
             "status": "proposal_ready" if self.mutation_proposals else "waiting",
             "backlog": len(self.mutation_backlog),
+            "execution_queue": len(self.execution_queue),
         }
         self.divisions["deploy"]["latest"] = {
             "finding": f"Rollback anchors {len(self.rollback_targets)}; closures {len(self.autonomous_closure_log)}",
@@ -969,8 +1161,8 @@ class AutonomousInstitutionEngine:
             "trusted": self.governance.trusted_identities,
         }
         self.divisions["supergrok_audit"]["latest"] = {
-            "finding": "More of the bounded mutation spine exists, but multi-file closure remains partially scaffolded.",
-            "severity": "high",
+            "finding": f"The richer bundle scaffold exists. External handoff queue depth is {len(self.execution_queue)} and mutation contracts are {len(self.mutation_contracts)}.",
+            "severity": "high" if len(self.execution_queue) == 0 else "medium",
         }
         for name, div in self.divisions.items():
             self._append_question(name, div["question"])
@@ -1005,6 +1197,7 @@ class AutonomousInstitutionEngine:
             self.observer_reports,
             self.mutation_backlog,
             self.regression_history,
+            self.execution_queue,
         )
         self.update_divisions(allocation)
         self.update_workers()
@@ -1085,6 +1278,7 @@ class AutonomousInstitutionEngine:
             self.observer_reports,
             self.mutation_backlog,
             self.regression_history,
+            self.execution_queue,
         )
         self.update_divisions(allocation)
         self.build_inbox()
@@ -1099,6 +1293,7 @@ class AutonomousInstitutionEngine:
             "ui_critique": self.ui_critique,
             "open_threads": len([t for t in self.redesign_threads if t.get('status') != 'closed']),
             "backlog": len(self.mutation_backlog),
+            "execution_queue": len(self.execution_queue),
         }
         self.deployment_sims = (self.deployment_sims + [sim])[-180:]
         self._append_stream("deploy_sims", sim)
@@ -1119,6 +1314,7 @@ class AutonomousInstitutionEngine:
             "observer_reports": self.observer_reports[-3:],
             "redesign_threads": self.redesign_threads[:3],
             "mutation_backlog": self.mutation_backlog[:5],
+            "execution_queue": self.execution_queue[:5],
         }
         self.research_history = (self.research_history + [cycle])[-180:]
         self._append_meeting("strategy", cycle)
@@ -1133,12 +1329,13 @@ class AutonomousInstitutionEngine:
             "background_debate_enabled": self.background_debate_enabled,
             "trusted_identities": self.governance.trusted_identities,
             "meta_evaluation": self.meta_evaluation,
-            "earned_power_next": "broader multi-file closure through bounded mutation bundles",
+            "earned_power_next": "broader multi-file closure through bounded mutation bundles and external handoff packets",
             "token_master": self.token_master,
             "spend": self.spend_state,
             "ui_critique": self.ui_critique,
             "open_threads": len([t for t in self.redesign_threads if t.get('status') != 'closed']),
             "mutation_backlog": len(self.mutation_backlog),
+            "execution_queue": len(self.execution_queue),
         }
         self.world_model["futures"] = (self.world_model["futures"] + [doctrine])[-100:]
         self._append_meeting("constitution", {"snapshot": snap, "doctrine": doctrine})
@@ -1168,6 +1365,9 @@ class AutonomousInstitutionEngine:
             "meta_evaluation": self.meta_evaluation,
             "mutation_proposals": self.mutation_proposals[:10],
             "mutation_backlog": self.mutation_backlog[:10],
+            "mutation_contracts": self.mutation_contracts[:10],
+            "execution_queue": self.execution_queue[:10],
+            "module_registry": self.module_registry,
             "rollback_targets": self.rollback_targets[:10],
             "delegation_map": self.delegation_map,
             "autonomous_closure_log": self.autonomous_closure_log[-20:],
@@ -1183,6 +1383,7 @@ class AutonomousInstitutionEngine:
             "redesign_threads": self.redesign_threads[:10],
             "module_mutation_policy": self.module_mutation_policy,
             "regression_history": self.regression_history[-20:],
+            "external_executor_state": self.external_executor_state,
         }
 
     def get_state(self):
@@ -1216,6 +1417,10 @@ class AutonomousInstitutionEngine:
             "delegation_map": self.delegation_map,
             "mutation_proposals": self.mutation_proposals[:10],
             "mutation_backlog": self.mutation_backlog[:20],
+            "mutation_contracts": self.mutation_contracts[:20],
+            "execution_queue": self.execution_queue[:20],
+            "module_registry": self.module_registry,
+            "external_executor_state": self.external_executor_state,
             "module_mutation_policy": self.module_mutation_policy,
             "rollback_targets": self.rollback_targets[:10],
             "autonomous_closure_log": self.autonomous_closure_log[-20:],
