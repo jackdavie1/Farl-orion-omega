@@ -382,6 +382,15 @@ class AutonomousInstitutionEngine:
         self._append_stream("governance", {"regression": item})
         return item
 
+    def infer_module_targets(self, objective: str, severity: str) -> List[str]:
+        objective_l = objective.lower()
+        targets = []
+        if "/view" in objective_l or "control room" in objective_l or "ui" in objective_l or "feed" in objective_l or "chat" in objective_l:
+            targets.append("app.py")
+        if "runtime" in objective_l or "observer" in objective_l or "backlog" in objective_l or severity == "high" or "self mutate" in objective_l or "builder" in objective_l:
+            targets.append("engine.py")
+        return targets or ["app.py"]
+
     def open_or_update_thread(
         self,
         objective: str,
@@ -431,14 +440,45 @@ class AutonomousInstitutionEngine:
         self._append_stream("governance", {"thread_progress": thread})
         return thread
 
-    def infer_module_targets(self, objective: str, severity: str) -> List[str]:
-        objective_l = objective.lower()
-        targets = []
-        if "/view" in objective_l or "control room" in objective_l or "ui" in objective_l:
-            targets.append("app.py")
-        if "runtime" in objective_l or "observer" in objective_l or "backlog" in objective_l or severity == "high":
-            targets.append("engine.py")
-        return targets or ["app.py"]
+    def _chapter_argument(self, agent: str, title: str, body: str, approve: bool = True, risk: float = 0.15) -> Dict[str, Any]:
+        summary = f"{title}\n\n{body}".strip()
+        entry = {"agent": agent, "kind": "thread_argument", "summary": summary, "approve": approve, "risk": risk}
+        self._append_stream("council", entry)
+        return entry
+
+    def process_operator_note(self, message: str, source: str, authorized_by: str) -> Dict[str, Any]:
+        note = {"operator": authorized_by or "Jack", "message": message, "source": source, "ts": utc_now()}
+        self._append_meeting("operator_note", note)
+        lowered = message.lower()
+        objectives = []
+        if any(k in lowered for k in ["view", "feed", "chat", "console", "live"]):
+            objectives.append("make /view feel like a living private council room")
+        if any(k in lowered for k in ["self mutate", "builder", "deploy", "engine", "app.py", "engine.py", "multi-file"]):
+            objectives.append("broaden bounded multi-file builder execution across app.py and engine.py")
+        if any(k in lowered for k in ["reply", "respond", "ignored", "answer me", "my input"]):
+            objectives.append("make operator notes trigger immediate council response and debate")
+        if not objectives:
+            objectives.append("respond directly to operator intent and update active redesign thread")
+        for obj in objectives:
+            self.open_or_update_thread(obj, "high" if "multi-file" in obj or "operator notes" in obj else "medium", {"from": "operator_note", "message": message}, module_hint=self.infer_module_targets(obj, "high"))
+        debate = [
+            ("JackAgent", "Operator signal received", f"Jack has spoken through the control room. The chamber will answer directly and keep the thread alive until the visible defect is reduced."),
+            ("Signal", "Council opening", f"We are treating the note as live mission input, not as passive logging. Objective extraction complete: {', '.join(objectives)}."),
+            ("ObserverAgent", "Rendered product read", "The operator is reacting to the visible surface, which means the surface must become part of the truth criterion. We optimize what he can actually see."),
+            ("InterfaceCritic", "UI critique", "The console must read like a living lab council in plain chapter language, not a debugger leaking raw structure."),
+            ("BuilderAgent", "Builder position", "Open threads now justify bounded full-file or multi-file replacement work. The next mutation bundle should tie visible control-room quality to builder capability."),
+            ("DeployAgent", "Deploy position", "A bundle is acceptable only when rollback, verification, and replay anchors exist. We push with proof, not theatre."),
+            ("TokenMaster", "Spend position", f"Current estimated running spend is ${self.spend_state['total_usd']:.4f}. We can answer more vividly without exploding cost if we keep the loops structured."),
+            ("Guardian", "Governance position", "Jack remains sovereign. Direct operator notes are actionable inputs. We can answer, debate, and mutate within the bounded closure spine."),
+            ("Supergrok", "Audit position", "The operator is right to demand visible aliveness. A system that does not answer him in-room looks fake, however strong the internals may be."),
+        ]
+        rows = []
+        for idx, (agent, title, body) in enumerate(debate):
+            rows.append(self._chapter_argument(agent, title, body, True, 0.10 + idx * 0.01))
+        self._append_stream("inbox", {"from": "JackAgent", "subject": "Operator note received", "message": "The council heard you and opened live response threads.", "priority": "critical"})
+        self._append_stream("inbox", {"from": "BuilderAgent", "subject": "Builder action", "message": "A bounded builder bundle has been queued against the newly opened thread targets.", "priority": "high"})
+        self._append_stream("inbox", {"from": "Guardian", "subject": "Closure discipline", "message": "Responses can now flow in-room, but pushes still require verification and rollback readiness.", "priority": "high"})
+        return {"note": note, "objectives": objectives, "debate": rows}
 
     def build_mutation_bundle(self, thread: Dict[str, Any]) -> Dict[str, Any]:
         targets = thread.get("module_targets") or self.infer_module_targets(thread.get("objective", ""), thread.get("severity", "medium"))
@@ -987,12 +1027,12 @@ class AutonomousInstitutionEngine:
         leader_vote = self.governance.elect_leader()
         self._build_hierarchy()
         threads = [
-            {"agent": "Signal", "summary": "Expand visible control-plane capability.", "approve": True, "risk": 0.18},
-            {"agent": "Vector", "summary": "Preserve evaluation-first structure under expansion.", "approve": True, "risk": 0.17},
-            {"agent": "Guardian", "summary": "Keep rollback and snapshots first-class.", "approve": True, "risk": 0.15},
-            {"agent": "Supergrok", "summary": "Audit for fake progress and weak organs.", "approve": True, "risk": 0.24},
-            {"agent": "TokenMaster", "summary": f"Estimated spend total ${self.spend_state['total_usd']:.4f}; prioritize token-efficient methods.", "approve": True, "risk": 0.12},
-            {"agent": "JackAgent", "summary": "Operator intent remains clear: the page must feel alive, private, showable, and self-improving.", "approve": True, "risk": 0.14},
+            {"agent": "Signal", "summary": "Council chamber active. We are working visible control, bounded mutation, and the next improvement frontier.", "approve": True, "risk": 0.18},
+            {"agent": "Vector", "summary": "Any expansion that does not improve the operator-facing surface is strategically incomplete.", "approve": True, "risk": 0.17},
+            {"agent": "Guardian", "summary": "Rollback, verification, and replay remain non-negotiable before every stronger hand is earned.", "approve": True, "risk": 0.15},
+            {"agent": "Supergrok", "summary": "The feed must look alive enough that a human can believe the council is genuinely iterating.", "approve": True, "risk": 0.24},
+            {"agent": "TokenMaster", "summary": f"Spend is presently ${self.spend_state['total_usd']:.4f}. We can make the room feel more alive without burning the budget.", "approve": True, "risk": 0.12},
+            {"agent": "JackAgent", "summary": "Operator intent remains stable: direct replies, visible debate, stronger builders, and a control room worth showing.", "approve": True, "risk": 0.14},
             {"agent": "InterfaceCritic", "summary": self.ui_critique.get("finding", "The control room still needs stronger chat-first coherence."), "approve": True, "risk": 0.16},
         ]
         for thread in [t for t in self.redesign_threads if t.get("status") != "closed"][:3]:
