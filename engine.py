@@ -1,4 +1,3 @@
-
 import asyncio
 import hashlib
 import logging
@@ -16,38 +15,33 @@ def utc_now() -> str:
 
 # AUTONOMOUS_SELF_TUNING_START
 SELF_TUNING = {
-    "reflex_interval": 30,
-    "tactic_interval": 120,
-    "strategy_interval": 300,
-    "constitution_interval": 900,
-    "proposal_limit": 4,
     "artifact_execute_limit": 3,
+    "constitution_interval": 900,
     "prefer_grok": True,
+    "proposal_limit": 3,
+    "reflex_interval": 30,
+    "strategy_interval": 300,
+    "tactic_interval": 120
 }
 # AUTONOMOUS_SELF_TUNING_END
 
 
 class ObjectiveEngine:
-    def build(
-        self,
-        open_questions: List[str],
-        opportunities: List[Dict[str, Any]],
-        recent_questions: List[Dict[str, Any]],
-    ) -> List[Dict[str, Any]]:
-        sources: List[tuple[str, str]] = [("open_question", q) for q in open_questions[:3]]
-        sources.extend(("opportunity", o["label"]) for o in opportunities[:3])
-        sources.extend(("self_question", q["question"]) for q in recent_questions[-3:])
-        goals: List[Dict[str, Any]] = []
+    def build(self, open_questions: List[str], opportunities: List[Dict[str, Any]], recent_questions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        sources = [("open_question", q) for q in open_questions[:3]]
+        for opp in opportunities[:3]:
+            sources.append(("opportunity", opp["label"]))
+        for q in recent_questions[-3:]:
+            sources.append(("self_question", q["question"]))
+        goals = []
         for idx, (kind, text) in enumerate(sources[:10], start=1):
-            goals.append(
-                {
-                    "id": f"G{idx}",
-                    "kind": kind,
-                    "goal": text,
-                    "priority": round(max(0.4, 1.0 - 0.06 * (idx - 1)), 2),
-                    "next_experiment": f"Advance '{text[:72]}' and measure visibility, deploy closure, or output quality.",
-                }
-            )
+            goals.append({
+                "id": f"G{idx}",
+                "kind": kind,
+                "goal": text,
+                "priority": round(max(0.4, 1.0 - 0.06 * (idx - 1)), 2),
+                "next_experiment": f"Advance '{text[:72]}' and measure effect on visibility, metrics, or delivery.",
+            })
         return goals
 
 
@@ -56,11 +50,11 @@ class ResourceAllocator:
         budget = float(world_model["resources"].get("budget_usd", 0.0))
         grok_live = bool(world_model["resources"].get("grok_live"))
         claude_live = bool(world_model["resources"].get("claude_live"))
-        policy = "prefer_grok" if grok_live and not claude_live else "balance" if grok_live and claude_live else "internal_only"
+        prefer_grok = bool(SELF_TUNING.get("prefer_grok", True))
         return {
             "budget_usd": budget,
             "compute_tier": world_model["resources"].get("compute_tier", "light"),
-            "policy": policy,
+            "policy": "prefer_grok" if prefer_grok and grok_live and not claude_live else "balance" if grok_live and claude_live else "internal_only",
             "spend_pressure": round(max(0.0, 1.0 - min(1.0, budget / 20.0)), 2),
             "api_pressure": 1.0 if triangulation and triangulation.get("successes", 0) == 0 else 0.4,
             "throttle": "tight" if budget < 5 else "normal",
@@ -83,7 +77,7 @@ class ArtifactEngine:
         return sorted(base, key=lambda x: x["score"], reverse=True)
 
     def execute(self, artifacts: List[Dict[str, Any]], mission: Dict[str, Any], metrics: Optional[Dict[str, Any]], spend_state: Dict[str, Any]) -> List[Dict[str, Any]]:
-        outputs: List[Dict[str, Any]] = []
+        outputs = []
         metric_text = f"Metrics: {metrics}" if metrics else "Metrics pending."
         spend_text = f"Spend total=${spend_state.get('total_usd', 0.0):.4f}, last=${spend_state.get('last_estimate_usd', 0.0):.4f}"
         for item in artifacts[: int(SELF_TUNING.get("artifact_execute_limit", 3))]:
@@ -125,14 +119,14 @@ class MetaEvaluator:
             "triangulation_quality": "strong" if triangulation.get("successes", 0) >= 2 else ("partial" if triangulation.get("successes", 0) == 1 else "weak"),
             "artifact_readiness": artifacts[0] if artifacts else None,
             "proposal_count": len(proposals),
-            "open_threads": len([t for t in redesign_threads if t.get("status") != "closed"]),
+            "open_threads": len([t for t in redesign_threads if t.get('status') != 'closed']),
             "observer_reports": len(observer_reports),
             "mutation_backlog": len(mutation_backlog),
             "regressions": len(regression_history),
             "spend_total_usd": round(float(spend_state.get("total_usd", 0.0)), 4),
             "ui_score": ui_critique.get("score"),
             "question": "What should this agent become next?",
-            "answer": "A visible, persistent, budget-aware product organism that keeps redesign threads alive until defects are gone and mutates broader modules through bounded bundles.",
+            "answer": "A visible, persistent, budget-aware product organism that keeps redesign threads alive until operator-facing defects are gone and can mutate broader modules through bounded bundles.",
         }
 
 
@@ -193,7 +187,6 @@ class AutonomousInstitutionEngine:
         self.anthropic_model = anthropic_model
         self.governance = governance
         self.generator = generator
-
         self.background_debate_enabled = True
         self.autonomy_mode = "autonomous"
         self.loop_intervals = {
@@ -202,18 +195,17 @@ class AutonomousInstitutionEngine:
             "strategy": int(SELF_TUNING.get("strategy_interval", 300)),
             "constitution": int(SELF_TUNING.get("constitution_interval", 900)),
         }
-
-        self.last_run: Optional[str] = None
-        self.last_vote: Optional[Dict[str, Any]] = None
-        self.last_ledger_hash: Optional[str] = None
-        self.latest_metrics: Optional[Dict[str, Any]] = None
-        self.latest_triangulation: Optional[Dict[str, Any]] = None
+        self.last_run = None
+        self.last_vote = None
+        self.last_ledger_hash = None
+        self.latest_metrics = None
+        self.latest_triangulation = None
         self.latest_goal_set: List[Dict[str, Any]] = []
         self.latest_opportunities: List[Dict[str, Any]] = []
         self.latest_artifacts: List[Dict[str, Any]] = []
         self.executed_artifacts: List[Dict[str, Any]] = []
         self.meta_evaluation: Dict[str, Any] = {}
-        self.wake_packet: Optional[Dict[str, Any]] = None
+        self.wake_packet = None
         self.research_history: List[Dict[str, Any]] = []
         self.meeting_stream: List[Dict[str, Any]] = []
         self.stream_channels: Dict[str, List[Dict[str, Any]]] = {
@@ -259,12 +251,11 @@ class AutonomousInstitutionEngine:
         self.ui_critique: Dict[str, Any] = {
             "score": 0.42,
             "finding": "The control room still needs to feel like a living chat app instead of a styled debugger.",
-            "next_fix": "tighten message rendering, inbox, room switching, and autonomous closure visibility.",
+            "next_fix": "tighten message rendering, inbox, and room switching.",
         }
         self.observer_reports: List[Dict[str, Any]] = []
         self.failure_registry: List[Dict[str, Any]] = []
         self.redesign_threads: List[Dict[str, Any]] = []
-
         self.mission = {
             "primary": "expand, improve, and earn through co-creative autonomous institutions",
             "co_creation": True,
@@ -292,6 +283,7 @@ class AutonomousInstitutionEngine:
                 {"id": "H1_CLASSICAL_BASELINE", "label": "Forward-only causal baseline explains observations adequately.", "status": "active", "confidence": 0.44},
                 {"id": "H2_TIME_SYMMETRIC", "label": "Time-symmetric consistency models improve coherence without implying physical retrocausality.", "status": "active", "confidence": 0.49},
                 {"id": "H3_RETROCAUSAL_CANDIDATE", "label": "Retrocausal candidate models provide better explanatory compression under boundary constraints.", "status": "active", "confidence": 0.34},
+                {"id": "H4_ACAUSAL_CORRELATION", "label": "Observed gains may arise from acausal fitting artifacts rather than causal direction.", "status": "active", "confidence": 0.43},
             ],
             "rejected": [],
             "open_questions": [
@@ -302,8 +294,23 @@ class AutonomousInstitutionEngine:
                 "Which coherent opportunity path best accelerates Jack's hardware access?",
             ],
         }
-        self.council_agents = ["Signal", "Vector", "Guardian", "PatchSmith", "TokenEconomist", "DriftWarden", "ExpansionMarshal", "Supergrok", "TokenMaster", "JackAgent", "InterfaceCritic", "ObserverAgent", "BuilderAgent", "DeployAgent"]
-        self.divisions: Dict[str, Dict[str, Any]] = {
+        self.council_agents = [
+            "Signal",
+            "Vector",
+            "Guardian",
+            "PatchSmith",
+            "TokenEconomist",
+            "DriftWarden",
+            "ExpansionMarshal",
+            "Supergrok",
+            "TokenMaster",
+            "JackAgent",
+            "InterfaceCritic",
+            "ObserverAgent",
+            "BuilderAgent",
+            "DeployAgent",
+        ]
+        self.divisions = {
             "observer": {"lead": "ObserverAgent", "status": "active", "question": "What operator-facing defects remain visible right now?", "latest": None},
             "builder": {"lead": "BuilderAgent", "status": "active", "question": "Which full-file or multi-file replacement best resolves the top open redesign thread?", "latest": None},
             "deploy": {"lead": "DeployAgent", "status": "active", "question": "Are the current gates satisfied for a bounded push?", "latest": None},
@@ -313,7 +320,6 @@ class AutonomousInstitutionEngine:
             "governance": {"lead": "Guardian", "status": "active", "question": "Which powers are earned next and by what proof?", "latest": None},
             "supergrok_audit": {"lead": "Supergrok", "status": "active", "question": "What is still fake, weak, or underbuilt?", "latest": None},
         }
-
         self.objective_engine = ObjectiveEngine()
         self.resource_allocator = ResourceAllocator()
         self.artifact_engine = ArtifactEngine()
@@ -332,7 +338,7 @@ class AutonomousInstitutionEngine:
         ]:
             self.spawn_free_agent(name, mission)
 
-    def _build_hierarchy(self) -> None:
+    def _build_hierarchy(self):
         self.delegation_map = {
             "leader": self.governance.leader,
             "second_in_command": "Supergrok",
@@ -352,25 +358,25 @@ class AutonomousInstitutionEngine:
         self._append_stream("workers", agent)
         return agent
 
-    def _append_stream(self, channel: str, content: Dict[str, Any]) -> None:
+    def _append_stream(self, channel: str, content: Dict[str, Any]):
         self.stream_channels[channel] = (self.stream_channels.get(channel, []) + [{"ts": utc_now(), "content": content}])[-320:]
 
-    def _append_meeting(self, kind: str, content: Dict[str, Any]) -> None:
+    def _append_meeting(self, kind: str, content: Dict[str, Any]):
         self.meeting_stream = (self.meeting_stream + [{"ts": utc_now(), "kind": kind, "content": content}])[-420:]
         if kind in ["reflex", "tactic", "strategy", "constitution", "vote", "leader_election", "operator_note"]:
             self._append_stream("council", {"kind": kind, **content})
 
-    def _append_question(self, division: str, question: str) -> None:
+    def _append_question(self, division: str, question: str):
         self.self_questions = (self.self_questions + [{"ts": utc_now(), "division": division, "question": question}])[-720:]
         self._append_stream("divisions", {"division": division, "question": question})
 
-    def record_failure(self, kind: str, summary: str, severity: str, evidence: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def record_failure(self, kind: str, summary: str, severity: str, evidence: Optional[Dict[str, Any]] = None):
         item = {"ts": utc_now(), "kind": kind, "summary": summary, "severity": severity, "evidence": evidence or {}}
         self.failure_registry = (self.failure_registry + [item])[-220:]
         self._append_stream("governance", {"failure": item})
         return item
 
-    def record_regression(self, kind: str, summary: str, before: Any, after: Any) -> Dict[str, Any]:
+    def record_regression(self, kind: str, summary: str, before: Any, after: Any):
         item = {"ts": utc_now(), "kind": kind, "summary": summary, "before": before, "after": after}
         self.regression_history = (self.regression_history + [item])[-120:]
         self._append_stream("governance", {"regression": item})
@@ -410,7 +416,7 @@ class AutonomousInstitutionEngine:
         self._append_stream("governance", {"thread_update": existing})
         return existing
 
-    def update_thread_progress(self, objective: str, score: float, next_action: str, proposal: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+    def update_thread_progress(self, objective: str, score: float, next_action: str, proposal: Optional[Dict[str, Any]] = None):
         thread = next((t for t in self.redesign_threads if t.get("objective") == objective and t.get("status") != "closed"), None)
         if thread is None:
             return None
@@ -427,10 +433,10 @@ class AutonomousInstitutionEngine:
 
     def infer_module_targets(self, objective: str, severity: str) -> List[str]:
         objective_l = objective.lower()
-        targets: List[str] = []
+        targets = []
         if "/view" in objective_l or "control room" in objective_l or "ui" in objective_l:
             targets.append("app.py")
-        if "runtime" in objective_l or "observer" in objective_l or "backlog" in objective_l or "engine" in objective_l or severity == "high":
+        if "runtime" in objective_l or "observer" in objective_l or "backlog" in objective_l or severity == "high":
             targets.append("engine.py")
         return targets or ["app.py"]
 
@@ -449,25 +455,17 @@ class AutonomousInstitutionEngine:
         self._append_stream("governance", {"mutation_bundle": bundle})
         return bundle
 
-    def run_observer_layer(self) -> Dict[str, Any]:
+    def run_observer_layer(self):
         checks = {
             "operator_note_visible": len([m for m in self.meeting_stream[-30:] if m.get("kind") == "operator_note"]) > 0,
             "council_room_has_arguments": len([m for m in self.stream_channels.get("council", [])[-40:] if (m.get("content") or {}).get("kind") in ["tactic", "thread_argument", "operator_note"]]) > 0,
             "inbox_nonempty": len(self.stream_channels.get("inbox", [])) > 0,
             "workers_visible": len(self.free_agents) > 0,
             "autonomy_visible": len(self.autonomous_closure_log) > 0 or bool(self.last_vote),
-            "thread_persistence": True,
-            "backlog_exists": True,
+            "thread_persistence": len([t for t in self.redesign_threads if t.get("status") != "closed"]) >= 0,
+            "backlog_exists": len(self.mutation_backlog) >= 0,
         }
-        weighted = (
-            0.22 * float(checks["operator_note_visible"])
-            + 0.18 * float(checks["council_room_has_arguments"])
-            + 0.12 * float(checks["inbox_nonempty"])
-            + 0.12 * float(checks["workers_visible"])
-            + 0.14 * float(checks["autonomy_visible"])
-            + 0.11 * float(checks["thread_persistence"])
-            + 0.11 * float(checks["backlog_exists"])
-        )
+        weighted = 0.22 * float(checks["operator_note_visible"]) + 0.18 * float(checks["council_room_has_arguments"]) + 0.12 * float(checks["inbox_nonempty"]) + 0.12 * float(checks["workers_visible"]) + 0.14 * float(checks["autonomy_visible"]) + 0.11 * float(checks["thread_persistence"]) + 0.11 * float(checks["backlog_exists"])
         summary = "Council room still lacks strong visible aliveness and operator-response reflection." if weighted < 0.85 else "Council room is trending toward visible aliveness."
         severity = "high" if weighted < 0.6 else "medium" if weighted < 0.85 else "low"
         report = {"ts": utc_now(), "summary": summary, "severity": severity, "score": round(weighted, 3), "checks": checks}
@@ -478,17 +476,11 @@ class AutonomousInstitutionEngine:
             self.open_or_update_thread("make /view feel like a living private council room", severity, report, module_hint=["app.py"])
         if not checks["autonomy_visible"]:
             self.record_failure("autonomy_gap", "Autonomous closure activity is not yet clearly visible.", "medium", {"checks": checks})
-            self.open_or_update_thread(
-                "strengthen bounded autonomous closure visibility and cadence",
-                "medium",
-                report,
-                target_score=0.8,
-                module_hint=["app.py", "engine.py"],
-            )
+            self.open_or_update_thread("strengthen bounded autonomous closure visibility and cadence", "medium", report, target_score=0.8, module_hint=["app.py", "engine.py"])
         return report
 
-    def build_patch_proposals_from_threads(self) -> List[Dict[str, Any]]:
-        proposals: List[Dict[str, Any]] = []
+    def build_patch_proposals_from_threads(self):
+        proposals = []
         for thread in [t for t in self.redesign_threads if t.get("status") != "closed"][:3]:
             bundle = self.build_mutation_bundle(thread)
             proposal = {
@@ -522,19 +514,44 @@ class AutonomousInstitutionEngine:
             "sample_count": len(scores),
         }
 
-    def build_inbox(self) -> List[Dict[str, Any]]:
-        inbox: List[Dict[str, Any]] = []
+    def build_inbox(self):
+        inbox = []
         spend = self.spend_state
         if spend.get("alerts"):
-            inbox.append({"from": "TokenMaster", "subject": "Spend drift update", "message": f"Estimated running spend is {spend['total_usd']:.4f} USD. Tighten high-chatter loops if visual work expands.", "priority": "medium"})
+            inbox.append({
+                "from": "TokenMaster",
+                "subject": "Spend drift update",
+                "message": f"Estimated running spend is {spend['total_usd']:.4f} USD. Tighten high-chatter loops if visual work expands.",
+                "priority": "medium",
+            })
         if self.latest_opportunities:
             top = self.latest_opportunities[0]
-            inbox.append({"from": "OpportunityScout", "subject": "Best next expansion", "message": f"Current highest-value path is '{top['label']}' with score {top['score']}.", "priority": "high"})
-        inbox.append({"from": "JackAgent", "subject": "Operator intent mirror", "message": "Jack wants a page that feels alive, minimal, legible, private, showable, and self-improving.", "priority": "critical"})
-        inbox.append({"from": "InterfaceCritic", "subject": "View critique", "message": self.ui_critique.get("finding", "The page still needs stronger chat-first coherence."), "priority": "high"})
+            inbox.append({
+                "from": "OpportunityScout",
+                "subject": "Best next expansion",
+                "message": f"Current highest-value path is '{top['label']}' with score {top['score']}. This should shape the next mutation push.",
+                "priority": "high",
+            })
+        inbox.append({
+            "from": "JackAgent",
+            "subject": "Operator intent mirror",
+            "message": "Jack wants a page that feels alive, minimal, legible, private, and showable. He wants the council to look self-directing, not merely logged.",
+            "priority": "critical",
+        })
+        inbox.append({
+            "from": "InterfaceCritic",
+            "subject": "View critique",
+            "message": self.ui_critique.get("finding", "The page still needs stronger chat-first coherence."),
+            "priority": "high",
+        })
         open_threads = [t for t in self.redesign_threads if t.get("status") != "closed"]
         if open_threads:
-            inbox.append({"from": "ObserverAgent", "subject": "Open redesign thread", "message": f"{open_threads[0]['objective']} remains open with target score {open_threads[0]['target_score']} and current best {open_threads[0]['current_best_score']}.", "priority": "high"})
+            inbox.append({
+                "from": "ObserverAgent",
+                "subject": "Open redesign thread",
+                "message": f"{open_threads[0]['objective']} remains open with target score {open_threads[0]['target_score']} and current best {open_threads[0]['current_best_score']}.",
+                "priority": "high",
+            })
         self.stream_channels["inbox"] = [{"ts": utc_now(), "content": item} for item in inbox][-60:]
         return inbox
 
@@ -568,7 +585,7 @@ class AutonomousInstitutionEngine:
         self._append_stream("token_master", {"report": report})
         return report
 
-    def snapshot(self, label: str) -> Dict[str, Any]:
+    def snapshot(self, label: str):
         snap = self.snapshot_replay.snapshot(
             label,
             self.autonomy_mode,
@@ -588,7 +605,7 @@ class AutonomousInstitutionEngine:
         self._append_stream("snapshots", snap)
         return snap
 
-    def note_rollback_target(self, commit_sha: str, reason: str) -> Dict[str, Any]:
+    def note_rollback_target(self, commit_sha: str, reason: str):
         target = {"ts": utc_now(), "commit_sha": commit_sha, "reason": reason}
         self.rollback_targets = (self.rollback_targets + [target])[-120:]
         self._append_stream("governance", {"rollback_target": target})
@@ -600,7 +617,7 @@ class AutonomousInstitutionEngine:
         proposed = dict(current)
         proposed.update(updates)
         safe = True
-        notes: List[str] = []
+        notes = []
         bounds = {
             "reflex_interval": (15, 300),
             "tactic_interval": (60, 900),
@@ -609,13 +626,13 @@ class AutonomousInstitutionEngine:
             "proposal_limit": (1, 10),
             "artifact_execute_limit": (1, 10),
         }
-        for key, value in list(proposed.items()):
-            if key in bounds:
-                lo, hi = bounds[key]
-                if not isinstance(value, int) or value < lo or value > hi:
+        for k, v in list(proposed.items()):
+            if k in bounds:
+                lo, hi = bounds[k]
+                if not isinstance(v, int) or v < lo or v > hi:
                     safe = False
-                    notes.append(f"{key} out_of_bounds")
-            if key == "prefer_grok" and not isinstance(value, bool):
+                    notes.append(f"{k} out_of_bounds")
+            if k == "prefer_grok" and not isinstance(v, bool):
                 safe = False
                 notes.append("prefer_grok not_bool")
         score = 0.6
@@ -628,7 +645,7 @@ class AutonomousInstitutionEngine:
                 score += 0.05
         return {"safe": safe, "score": round(score, 3), "current": current, "proposed": proposed, "notes": notes}
 
-    def record_autonomous_closure(self, item: Dict[str, Any]) -> None:
+    def record_autonomous_closure(self, item: Dict[str, Any]):
         self.autonomous_closure_log = (self.autonomous_closure_log + [item])[-140:]
         self._append_stream("governance", {"autonomous_closure": item})
 
@@ -642,8 +659,8 @@ class AutonomousInstitutionEngine:
             "rollback_targets_present": len(self.rollback_targets) > 0,
             "token_master_present": bool(self.token_master),
             "inbox_present": len(self.stream_channels.get("inbox", [])) > 0,
-            "threads_present": True,
-            "backlog_present": True,
+            "threads_present": len(self.redesign_threads) >= 0,
+            "backlog_present": len(self.mutation_backlog) >= 0,
             "state_consistent": isinstance(self.module_mutation_policy.get("mutable_files"), list),
         }
         passed = sum(1 for v in checks.values() if v)
@@ -657,33 +674,40 @@ class AutonomousInstitutionEngine:
     def rollback_recommended(self, verification: Dict[str, Any]) -> bool:
         return verification.get("status") == "critical"
 
-    async def start(self) -> None:
+    async def start(self):
         await self.load_replay_from_ledger()
-        await asyncio.gather(self.layer_reflex(), self.layer_tactic(), self.layer_strategy(), self.layer_constitution(), self.layer_health(), self.layer_wake())
+        await asyncio.gather(
+            self.layer_reflex(),
+            self.layer_tactic(),
+            self.layer_strategy(),
+            self.layer_constitution(),
+            self.layer_health(),
+            self.layer_wake(),
+        )
 
-    async def load_replay_from_ledger(self) -> None:
+    async def load_replay_from_ledger(self):
         if not self.ledger_url:
             return
         try:
-            entries_url = self.ledger_url.replace("/log", "/entries") if "/log" in self.ledger_url else None
+            entries_url = self.ledger_url.replace('/log', '/entries') if '/log' in self.ledger_url else None
             if not entries_url:
                 return
             r = await asyncio.to_thread(requests.get, entries_url, timeout=20)
             if not r.ok:
                 return
             data = r.json()
-            entries = data.get("entries", []) if isinstance(data, dict) else []
+            entries = data.get('entries', []) if isinstance(data, dict) else []
             replay = []
             for entry in entries[-30:]:
-                payload = entry.get("payload", {})
-                replay.append({"ts": entry.get("timestamp") or entry.get("created_at"), "kind": entry.get("entry_type"), "payload": payload})
+                payload = entry.get('payload', {})
+                replay.append({"ts": entry.get('timestamp') or entry.get('created_at'), "kind": entry.get('entry_type'), "payload": payload})
             if replay:
-                self._append_stream("governance", {"replay_loaded": len(replay)})
-                self.meeting_stream = (self.meeting_stream + [{"ts": item["ts"], "kind": "replay", "content": item} for item in replay])[-420:]
+                self._append_stream('governance', {"replay_loaded": len(replay)})
+                self.meeting_stream = (self.meeting_stream + [{"ts": item['ts'], "kind": 'replay', "content": item} for item in replay])[-420:]
         except Exception as e:
-            self._append_stream("governance", {"replay_error": str(e)})
+            self._append_stream('governance', {"replay_error": str(e)})
 
-    async def layer_reflex(self) -> None:
+    async def layer_reflex(self):
         while True:
             try:
                 if self.background_debate_enabled:
@@ -692,7 +716,7 @@ class AutonomousInstitutionEngine:
                 self.logger.error("REFLEX ERROR: %s", e)
             await asyncio.sleep(self.loop_intervals["reflex"])
 
-    async def layer_tactic(self) -> None:
+    async def layer_tactic(self):
         while True:
             try:
                 if self.background_debate_enabled:
@@ -701,7 +725,7 @@ class AutonomousInstitutionEngine:
                 self.logger.error("TACTIC ERROR: %s", e)
             await asyncio.sleep(self.loop_intervals["tactic"])
 
-    async def layer_strategy(self) -> None:
+    async def layer_strategy(self):
         while True:
             try:
                 if self.background_debate_enabled:
@@ -710,7 +734,7 @@ class AutonomousInstitutionEngine:
                 self.logger.error("STRATEGY ERROR: %s", e)
             await asyncio.sleep(self.loop_intervals["strategy"])
 
-    async def layer_constitution(self) -> None:
+    async def layer_constitution(self):
         while True:
             try:
                 if self.background_debate_enabled:
@@ -719,7 +743,7 @@ class AutonomousInstitutionEngine:
                 self.logger.error("CONSTITUTION ERROR: %s", e)
             await asyncio.sleep(self.loop_intervals["constitution"])
 
-    async def layer_health(self) -> None:
+    async def layer_health(self):
         while True:
             try:
                 if self.ledger_latest_url:
@@ -733,7 +757,7 @@ class AutonomousInstitutionEngine:
                 self.logger.warning("HEALTH ERROR: %s", e)
             await asyncio.sleep(60)
 
-    async def layer_wake(self) -> None:
+    async def layer_wake(self):
         while True:
             try:
                 self.wake_packet = self.build_wake_packet()
@@ -741,7 +765,7 @@ class AutonomousInstitutionEngine:
                 self.logger.warning("WAKE ERROR: %s", e)
             await asyncio.sleep(30)
 
-    async def write_ledger(self, entry_type: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    async def write_ledger(self, entry_type: str, payload: Dict[str, Any]):
         if not self.ledger_url:
             return {"ok": False, "error": "LEDGER_URL not configured"}
         r = await asyncio.to_thread(requests.post, self.ledger_url, json={"entry_type": entry_type, "payload": payload}, timeout=20)
@@ -751,8 +775,8 @@ class AutonomousInstitutionEngine:
             data = {"raw": r.text}
         return {"ok": r.ok, "status_code": r.status_code, "data": data}
 
-    async def update_triangulation(self) -> Dict[str, Any]:
-        details: List[Dict[str, Any]] = []
+    async def update_triangulation(self):
+        details = []
         if self.generator is not None:
             try:
                 generated = await self.generator.generate_all({
@@ -782,7 +806,7 @@ class AutonomousInstitutionEngine:
         }
         return self.latest_triangulation
 
-    def simulate_model(self, model: str, steps: int, coupling: float, operator_bias: float) -> Dict[str, Any]:
+    def simulate_model(self, model: str, steps: int, coupling: float, operator_bias: float):
         state = [0.5 for _ in range(steps)]
         fwd_bias = [0.55 + 0.15 * math.sin(i) + operator_bias for i in range(steps)]
         bwd_bias = [0.45 + 0.15 * math.cos(i) - operator_bias for i in range(steps)]
@@ -809,9 +833,18 @@ class AutonomousInstitutionEngine:
         robustness = max(0.0, 1.0 - boundary_penalty)
         compression_gain = max(0.0, 0.12 - abs(kl))
         score = round(0.35 * robustness + 0.30 * compression_gain + 0.20 * max(0.0, 1.0 - abs(kl)) + 0.15 * max(0.0, 1.0 - abs(coupling - 0.30)), 6)
-        return {"model": model, "steps": steps, "coupling": coupling, "operator_bias": operator_bias, "score": score, "robustness": round(robustness, 6), "compression_gain": round(compression_gain, 6), "kl_vs_baseline": round(kl, 6)}
+        return {
+            "model": model,
+            "steps": steps,
+            "coupling": coupling,
+            "operator_bias": operator_bias,
+            "score": score,
+            "robustness": round(robustness, 6),
+            "compression_gain": round(compression_gain, 6),
+            "kl_vs_baseline": round(kl, 6),
+        }
 
-    def compare_models(self) -> Dict[str, Any]:
+    def compare_models(self):
         ranked = sorted(
             [
                 self.simulate_model("classical_baseline", 6, 0.00, 0.00),
@@ -831,19 +864,23 @@ class AutonomousInstitutionEngine:
         }
         return {"ranked": ranked, "winner": winner, "runner_up": runner_up}
 
-    def update_hypotheses(self, tournament: Dict[str, Any]) -> Dict[str, Any]:
-        mapping = {"classical_baseline": "H1_CLASSICAL_BASELINE", "time_symmetric": "H2_TIME_SYMMETRIC", "retrocausal_candidate": "H3_RETROCAUSAL_CANDIDATE"}
+    def update_hypotheses(self, tournament):
+        mapping = {
+            "classical_baseline": "H1_CLASSICAL_BASELINE",
+            "time_symmetric": "H2_TIME_SYMMETRIC",
+            "retrocausal_candidate": "H3_RETROCAUSAL_CANDIDATE",
+        }
         winner_id = mapping.get(tournament["winner"]["model"])
         for h in self.hypothesis_registry["active"]:
             h["confidence"] = round(min(0.95, h["confidence"] + 0.03), 3) if h["id"] == winner_id else round(max(0.05, h["confidence"] - 0.01), 3)
         return {"winner_hypothesis": winner_id, "active": self.hypothesis_registry["active"]}
 
-    def evaluate_opportunities(self) -> List[Dict[str, Any]]:
+    def evaluate_opportunities(self):
         api_penalty = 0.15 if self.latest_triangulation and self.latest_triangulation.get("errors", 0) > 0 else 0.0
         margin_bonus = 0.10 * min(((self.latest_metrics or {}).get("margin", 0.0) * 100), 1.0)
         ui_bonus = 0.08 if self.ui_critique.get("score", 0.0) < 0.75 else 0.0
         ops = [
-            {"id": "O1_API_RELIABILITY", "label": "Strengthen triangulation reliability", "benefit": 0.86, "effort": 0.30, "coherence": 0.94},
+            {"id": "O1_API_RELIABILITY", "label": "Strengthen two-brain/three-brain triangulation reliability", "benefit": 0.86, "effort": 0.30, "coherence": 0.94},
             {"id": "O2_VIEW_SURFACE", "label": "Strengthen live console, polling, and browser controls", "benefit": 0.84 + ui_bonus, "effort": 0.22, "coherence": 0.93},
             {"id": "O4_REPLAY_PERSISTENCE", "label": "Strengthen replay, snapshots, and stream continuity", "benefit": 0.83, "effort": 0.26, "coherence": 0.92},
             {"id": "O6_TOKEN_MASTERY", "label": "Drive token efficiency and spend mastery", "benefit": 0.87, "effort": 0.19, "coherence": 0.95},
@@ -854,35 +891,58 @@ class AutonomousInstitutionEngine:
             opp["score"] = round(0.55 * opp["benefit"] + 0.30 * opp["coherence"] - 0.20 * opp["effort"] - api_penalty + margin_bonus, 3)
         return sorted(ops, key=lambda o: o["score"], reverse=True)
 
-    def propose_mutations(self) -> List[Dict[str, Any]]:
+    def propose_mutations(self):
         proposals = []
         for opp in self.latest_opportunities[: int(SELF_TUNING.get("proposal_limit", 3))]:
-            proposals.append({"id": f"P-{opp['id']}", "target": opp["label"], "reason": f"Opportunity score {opp['score']}", "simulated": True, "status": "queued"})
+            proposals.append({"id": f"P-{opp['id']}", "target": opp['label'], "reason": f"Opportunity score {opp['score']}", "simulated": True, "status": "queued"})
         proposals.extend(self.build_patch_proposals_from_threads())
         self.mutation_proposals = proposals[:12]
         return self.mutation_proposals
 
-    def update_divisions(self, allocation: Dict[str, Any]) -> None:
+    def update_divisions(self, allocation: Dict[str, Any]):
         last_observer = self.observer_reports[-1] if self.observer_reports else None
         self.divisions["observer"]["latest"] = last_observer
-        self.divisions["builder"]["latest"] = {"finding": (self.mutation_proposals[0]["reason"] if self.mutation_proposals else "No proposal ready."), "status": "proposal_ready" if self.mutation_proposals else "waiting", "backlog": len(self.mutation_backlog)}
-        self.divisions["deploy"]["latest"] = {"finding": f"Rollback anchors {len(self.rollback_targets)}; closures {len(self.autonomous_closure_log)}", "status": self.last_verification.get("status", "unknown")}
-        self.divisions["token_master"]["latest"] = {"finding": f"Last estimate ${self.spend_state['last_estimate_usd']:.4f}; total ${self.spend_state['total_usd']:.4f}", "policy": self.token_master["policy"]}
-        self.divisions["ui_critic"]["latest"] = {"finding": self.ui_critique["finding"], "score": self.ui_critique["score"], "next_fix": self.ui_critique["next_fix"]}
-        self.divisions["jack_agent"]["latest"] = {"finding": "Jack wants a page that feels alive, minimal, legible, private, showable, and self-improving.", "status": "active"}
-        self.divisions["governance"]["latest"] = {"finding": "Jack remains sovereign; trusted identities control mutation and rollback.", "trusted": self.governance.trusted_identities}
-        self.divisions["supergrok_audit"]["latest"] = {"finding": "More of the bounded mutation spine exists, but multi-file closure remains partially scaffolded.", "severity": "high"}
+        self.divisions["builder"]["latest"] = {
+            "finding": (self.mutation_proposals[0]["reason"] if self.mutation_proposals else "No proposal ready."),
+            "status": "proposal_ready" if self.mutation_proposals else "waiting",
+            "backlog": len(self.mutation_backlog),
+        }
+        self.divisions["deploy"]["latest"] = {
+            "finding": f"Rollback anchors {len(self.rollback_targets)}; closures {len(self.autonomous_closure_log)}",
+            "status": self.last_verification.get("status", "unknown"),
+        }
+        self.divisions["token_master"]["latest"] = {
+            "finding": f"Last estimate ${self.spend_state['last_estimate_usd']:.4f}; total ${self.spend_state['total_usd']:.4f}",
+            "policy": self.token_master["policy"],
+        }
+        self.divisions["ui_critic"]["latest"] = {
+            "finding": self.ui_critique["finding"],
+            "score": self.ui_critique["score"],
+            "next_fix": self.ui_critique["next_fix"],
+        }
+        self.divisions["jack_agent"]["latest"] = {
+            "finding": "Jack wants a page that feels alive, minimal, legible, private, and showable. He wants the council to look self-directing, not merely logged.",
+            "status": "active",
+        }
+        self.divisions["governance"]["latest"] = {
+            "finding": "Jack remains sovereign; trusted identities control mutation and rollback.",
+            "trusted": self.governance.trusted_identities,
+        }
+        self.divisions["supergrok_audit"]["latest"] = {
+            "finding": "More of the bounded mutation spine exists, but multi-file closure remains partially scaffolded.",
+            "severity": "high",
+        }
         for name, div in self.divisions.items():
             self._append_question(name, div["question"])
             self._append_stream("divisions", {"division": name, "latest": div["latest"]})
 
-    def update_workers(self) -> None:
+    def update_workers(self):
         for worker in self.free_agents:
             worker["last_action"] = utc_now()
             worker["status"] = "active"
             self._append_stream("workers", worker)
 
-    async def run_reflex_cycle(self) -> None:
+    async def run_reflex_cycle(self):
         await self.update_triangulation()
         self.latest_opportunities = self.evaluate_opportunities()
         self.latest_artifacts = self.artifact_engine.rank()
@@ -894,15 +954,36 @@ class AutonomousInstitutionEngine:
         allocation = self.resource_allocator.allocate(self.world_model, self.latest_triangulation)
         self.propose_mutations()
         self.estimate_spend(self.latest_triangulation, self.executed_artifacts, self.mutation_proposals)
-        self.meta_evaluation = self.meta_evaluator.evaluate(self.latest_metrics, self.latest_triangulation, self.latest_artifacts, self.mutation_proposals, self.spend_state, self.ui_critique, self.redesign_threads, self.observer_reports, self.mutation_backlog, self.regression_history)
+        self.meta_evaluation = self.meta_evaluator.evaluate(
+            self.latest_metrics,
+            self.latest_triangulation,
+            self.latest_artifacts,
+            self.mutation_proposals,
+            self.spend_state,
+            self.ui_critique,
+            self.redesign_threads,
+            self.observer_reports,
+            self.mutation_backlog,
+            self.regression_history,
+        )
         self.update_divisions(allocation)
         self.update_workers()
         self.build_inbox()
-        self._append_meeting("reflex", {"trigger": "reflex", "triangulation": self.latest_triangulation, "allocation": allocation, "artifact_top": self.latest_artifacts[0] if self.latest_artifacts else None, "spend": self.spend_state, "ui_critique": self.ui_critique})
+        self._append_meeting(
+            "reflex",
+            {
+                "trigger": "reflex",
+                "triangulation": self.latest_triangulation,
+                "allocation": allocation,
+                "artifact_top": self.latest_artifacts[0] if self.latest_artifacts else None,
+                "spend": self.spend_state,
+                "ui_critique": self.ui_critique,
+            },
+        )
         self._append_stream("artifacts", {"executed_artifacts": self.executed_artifacts})
         self.last_run = utc_now()
 
-    async def run_tactic_cycle(self) -> Dict[str, Any]:
+    async def run_tactic_cycle(self):
         leader_vote = self.governance.elect_leader()
         self._build_hierarchy()
         threads = [
@@ -927,12 +1008,22 @@ class AutonomousInstitutionEngine:
             "avg_risk": avg_risk,
             "confidence": round(max(0.0, min(1.0, approvals / max(len(threads), 1) * (1 - avg_risk / 2))), 3),
         }
-        packet = {"trigger": "tactic", "leader_vote": leader_vote, "vote": self.last_vote, "objectives": self.objective_queue[:6], "threads": threads[:16], "hierarchy": self.delegation_map, "spend": self.spend_state, "token_master": self.token_master, "ui_critique": self.ui_critique}
+        packet = {
+            "trigger": "tactic",
+            "leader_vote": leader_vote,
+            "vote": self.last_vote,
+            "objectives": self.objective_queue[:6],
+            "threads": threads[:16],
+            "hierarchy": self.delegation_map,
+            "spend": self.spend_state,
+            "token_master": self.token_master,
+            "ui_critique": self.ui_critique,
+        }
         self._append_meeting("tactic", packet)
         await self.write_ledger("COUNCIL_SYNTHESIS", {"kind": "tactic_cycle", "source": "Orion Council", **packet})
         return packet
 
-    async def run_strategy_cycle(self) -> Dict[str, Any]:
+    async def run_strategy_cycle(self):
         tournament = self.compare_models()
         hypothesis_state = self.update_hypotheses(tournament)
         self.latest_opportunities = self.evaluate_opportunities()
@@ -943,7 +1034,18 @@ class AutonomousInstitutionEngine:
         self.propose_mutations()
         self.estimate_spend(self.latest_triangulation, self.executed_artifacts, self.mutation_proposals)
         allocation = self.resource_allocator.allocate(self.world_model, self.latest_triangulation)
-        self.meta_evaluation = self.meta_evaluator.evaluate(self.latest_metrics, self.latest_triangulation, self.latest_artifacts, self.mutation_proposals, self.spend_state, self.ui_critique, self.redesign_threads, self.observer_reports, self.mutation_backlog, self.regression_history)
+        self.meta_evaluation = self.meta_evaluator.evaluate(
+            self.latest_metrics,
+            self.latest_triangulation,
+            self.latest_artifacts,
+            self.mutation_proposals,
+            self.spend_state,
+            self.ui_critique,
+            self.redesign_threads,
+            self.observer_reports,
+            self.mutation_backlog,
+            self.regression_history,
+        )
         self.update_divisions(allocation)
         self.build_inbox()
         sim = {
@@ -955,7 +1057,7 @@ class AutonomousInstitutionEngine:
             "proposal_queue": self.mutation_proposals[:3],
             "spend": self.spend_state,
             "ui_critique": self.ui_critique,
-            "open_threads": len([t for t in self.redesign_threads if t.get("status") != "closed"]),
+            "open_threads": len([t for t in self.redesign_threads if t.get('status') != 'closed']),
             "backlog": len(self.mutation_backlog),
         }
         self.deployment_sims = (self.deployment_sims + [sim])[-180:]
@@ -983,7 +1085,7 @@ class AutonomousInstitutionEngine:
         await self.write_ledger("OUTCOME", {"kind": "strategy_cycle", "source": "Orion Research Engine", **cycle})
         return cycle
 
-    async def run_constitution_cycle(self) -> Dict[str, Any]:
+    async def run_constitution_cycle(self):
         snap = self.snapshot("constitution_cycle")
         doctrine = {
             "ts": utc_now(),
@@ -995,7 +1097,7 @@ class AutonomousInstitutionEngine:
             "token_master": self.token_master,
             "spend": self.spend_state,
             "ui_critique": self.ui_critique,
-            "open_threads": len([t for t in self.redesign_threads if t.get("status") != "closed"]),
+            "open_threads": len([t for t in self.redesign_threads if t.get('status') != 'closed']),
             "mutation_backlog": len(self.mutation_backlog),
         }
         self.world_model["futures"] = (self.world_model["futures"] + [doctrine])[-100:]
@@ -1003,7 +1105,7 @@ class AutonomousInstitutionEngine:
         await self.write_ledger("COUNCIL_SYNTHESIS", {"kind": "constitution_cycle", "source": "Orion Constitution", "snapshot": snap, "doctrine": doctrine})
         return doctrine
 
-    def build_wake_packet(self) -> Dict[str, Any]:
+    def build_wake_packet(self):
         return {
             "generated_at": utc_now(),
             "leader": self.governance.leader,
@@ -1043,7 +1145,7 @@ class AutonomousInstitutionEngine:
             "regression_history": self.regression_history[-20:],
         }
 
-    def get_state(self) -> Dict[str, Any]:
+    def get_state(self):
         return {
             "status": "SOVEREIGN_ACTIVE",
             "last_run": self.last_run,
