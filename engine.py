@@ -378,8 +378,22 @@ class AutonomousInstitutionEngine:
                 "txn_id": txn_id, "ts": utc(),
             })
 
-            # 1. Synthesize
-            proposal = await self.generator.synthesize(objective, self.get_state())
+            # 1. Collect recent failure context for learning injection
+            failure_context = []
+            try:
+                recent_failures = await self.ledger.scan_by_type("MUTATION_FAILED", max_pages=2)
+                for r in recent_failures[:3]:
+                    d = r.get("payload", {})
+                    failure_context.append({
+                        "objective": d.get("objective", d.get("last_objective", ""))[:120],
+                        "reason": d.get("reason", d.get("error", ""))[:200],
+                        "file": str(d.get("touched_modules", d.get("shadow_fail_type", "")))[:80]
+                    })
+            except Exception:
+                pass
+
+            # 1. Synthesize with failure history
+            proposal = await self.generator.synthesize(objective, self.get_state(), failure_context=failure_context)
             if "error" in proposal and "code_map" not in proposal:
                 self.cog.transactions.update(status="synthesis_failed")
                 self.cog.transactions.close("synthesis_failed")
