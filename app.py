@@ -893,3 +893,74 @@ refresh();setInterval(refresh,2500);
 </script>
 </body>
 </html>"""
+
+def render_evolution_console(engine: AutonomousInstitutionEngine) -> str:
+    def render_nested_goals(goals: List[Dict[str, Any]]) -> str:
+        html = ''
+        for goal in goals:
+            name = goal.get('name', 'Unnamed Goal')
+            progress = goal.get('progress', 0)
+            priority = goal.get('priority', 'N/A')
+            html += f'<li><strong>{name}</strong> (Priority: {priority}, Progress: {progress}%)<ul>'
+            if 'subgoals' in goal:
+                html += render_nested_goals(goal['subgoals'])
+            html += '</ul></li>'
+        return html
+
+    self_model_section = """
+    <div id="self-model">
+        <h2>Self-Model: Agent States and Configurations</h2>
+        <pre id="agent-states">{agent_states}</pre>
+    </div>
+    """.format(agent_states=str(engine.get_agent_states()))
+
+    goal_hierarchy_section = """
+    <div id="goal-hierarchy">
+        <h2>Goal Hierarchy</h2>
+        <ul id="goals-list">{goals_html}</ul>
+    </div>
+    """.format(goals_html=render_nested_goals(engine.get_goal_hierarchy()))
+
+    bridge_requests_section = """
+    <div id="bridge-requests">
+        <h2>Bridge Request Panels</h2>
+        <form id="bridge-form">
+            <label>Target Agent: <input type="text" name="target_agent"></label><br>
+            <label>Integration Type: <select name="type"><option>inter-agent</option><option>external</option></select></label><br>
+            <button type="submit">Request Bridge</button>
+        </form>
+        <div id="pending-bridges">{pending}</div>
+        <div id="approved-bridges">{approved}</div>
+    </div>
+    """.format(pending=str(engine.get_pending_bridges()), approved=str(engine.get_approved_bridges()))
+
+    return f"""
+    <!DOCTYPE html>
+    <html>
+    <head><title>Evolution Console</title></head>
+    <body>
+        {self_model_section}
+        {goal_hierarchy_section}
+        {bridge_requests_section}
+        <script>
+            document.addEventListener('DOMContentLoaded', function() {{
+                document.getElementById('bridge-form').addEventListener('submit', function(e) {{
+                    e.preventDefault();
+                    const formData = new FormData(this);
+                    // Simulate submission; in production, send to server
+                    console.log('Bridge request:', Object.fromEntries(formData));
+                    alert('Bridge request submitted!');
+                }});
+            }});
+        </script>
+    </body>
+    </html>
+    """
+
+def get_view_data(engine: AutonomousInstitutionEngine) -> str:
+    # New implementation integrating evolution console as the primary view
+    try:
+        return render_evolution_console(engine)
+    except AttributeError as e:
+        # Fallback if engine methods are unavailable
+        return f'<html><body><h1>Error loading view: {str(e)}</h1></body></html>'
