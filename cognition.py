@@ -467,8 +467,7 @@ class MetaStrategy:
             return False, f"status={mutation_status}"
         if self.mode == "freeze":
             return False, "meta: freeze mode active"
-        if self.mode == "heal" and self.exploration_pressure < 0.25:
-            return False, "meta: heal mode, exploration suppressed"
+        # heal mode must still allow mutation - healing IS attempting fixes
         return True, "ok"
 
     def objective_hint(self, self_model: SelfModel, learning: LearningState) -> str:
