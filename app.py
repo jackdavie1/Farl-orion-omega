@@ -1041,3 +1041,98 @@ def get_view_data(engine: AutonomousInstitutionEngine) -> str:
     except AttributeError as e:
         # Fallback if engine methods are unavailable
         return f'<html><body><h1>Error loading view: {str(e)}</h1></body></html>'
+
+async def analyze_cycle_gaps():
+    """Scan last 100 cycles for performance gaps and generate surgical mutations"""
+    state = engine.get_state()
+    cycle_count = getattr(engine, 'cycle_count', 0)
+    
+    # Get historical cycle data
+    cycle_history = getattr(engine, 'cycle_history', [])
+    recent_cycles = cycle_history[-100:] if len(cycle_history) >= 100 else cycle_history
+    
+    # Performance indicators from current state and history
+    fragility = state.get('fragility', 0)
+    failure_streak = state.get('failure_streak', 0)
+    stagnation = getattr(engine, 'stagnation_cycles', 0)
+    
+    suggestions = []
+    
+    # High fragility → stability mutations
+    if fragility > 0.7:
+        suggestions.append({
+            "priority": "HIGH",
+            "type": "stability_enhancement",
+            "target": "error_handling",
+            "description": "Implement redundant execution paths",
+            "estimated_cycles": 3
+        })
+    
+    # Failure streaks → recovery mutations
+    if failure_streak > 5:
+        suggestions.append({
+            "priority": "CRITICAL",
+            "type": "recovery_protocol",
+            "target": "execution_engine",
+            "description": "Add failure cascade breakers",
+            "estimated_cycles": 2
+        })
+    
+    # Stagnation → expansion mutations
+    if stagnation > 10:
+        suggestions.append({
+            "priority": "MEDIUM",
+            "type": "capability_expansion",
+            "target": "agent_spawning",
+            "description": "Spawn specialized analysis agents",
+            "estimated_cycles": 5
+        })
+    
+    # Historical pattern analysis
+    if recent_cycles:
+        success_rate = sum(1 for c in recent_cycles if c.get('success', False)) / len(recent_cycles)
+        if success_rate < 0.6:
+            suggestions.append({
+                "priority": "HIGH",
+                "type": "pattern_correction",
+                "target": "decision_logic",
+                "description": f"Success rate {success_rate:.2f} below threshold",
+                "estimated_cycles": 4
+            })
+    
+    return suggestions
+
+async def gather_introspection_data():
+    """Aggregate live state, decision trees, gaps, and mutation suggestions"""
+    state = engine.get_state()
+    
+    # Decision trees from engine traces
+    decision_trees = {
+        "last_decision": getattr(engine, 'last_decision', None),
+        "active_reasoning": getattr(engine.cog, 'current_reasoning', []),
+        "meta_transitions": getattr(engine.cog.meta, 'transition_log', [])
+    }
+    
+    # Capability gaps from guardian logs
+    capability_gaps = {
+        "governance_blocks": getattr(governance, 'recent_blocks', []),
+        "trust_violations": getattr(governance, 'trust_log', []),
+        "expansion_limits": getattr(engine, 'expansion_constraints', [])
+    }
+    
+    # Mutation suggestions from cycle analysis
+    mutation_suggestions = await analyze_cycle_gaps()
+    
+    return {
+        "timestamp_utc": utc(),
+        "agent_state": state,
+        "decision_trees": decision_trees,
+        "capability_gaps": capability_gaps,
+        "mutation_suggestions": mutation_suggestions,
+        "expansion_metrics": {
+            "cycles_completed": getattr(engine, 'cycle_count', 0),
+            "mutation_rate": getattr(engine, 'mutation_frequency', 0),
+            "capability_growth": len(state.get('capabilities', [])),
+            "autonomy_level": getattr(engine, 'autonomy_mode', 'unknown')
+        }
+    }
