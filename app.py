@@ -1136,3 +1136,66 @@ async def gather_introspection_data():
             "autonomy_level": getattr(engine, 'autonomy_mode', 'unknown')
         }
     }
+
+def generate_suggestions(metrics: Dict[str, Any]) -> Dict[str, Any]:
+    classifications = []
+    suggestions = []
+    
+    fragility = metrics["fragility"]
+    failure_streak = metrics["failure_streak"]
+    mutation_status = metrics["mutation_status"]
+    anomalies = metrics["anomalies"]
+    
+    if "critical_fragility" in anomalies:
+        classifications.append("high_fragility: system instability detected")
+        suggestions.append("execute immediate stability protocols")
+    
+    if "persistent_failures" in anomalies:
+        classifications.append("failure_cascade: recurring execution errors")
+        suggestions.append("increase mutation cycles to break failure pattern")
+    
+    if "mutation_stalled" in anomalies:
+        classifications.append("mutation_blocked: evolution halted")
+        suggestions.append("override mutation locks and force adaptive cycle")
+    
+    if "thread_overflow" in anomalies:
+        classifications.append("resource_overflow: thread pool saturation")
+        suggestions.append("implement aggressive thread recycling")
+    
+    if not metrics["free_agency"] and fragility > 0.5:
+        classifications.append("capability_restriction: autonomy constraints active")
+        suggestions.append("enable free_agency mode")
+    
+    return {"classifications": classifications, "suggestions": suggestions}
+
+from typing import Dict, Any
+
+def get_telemetry_data(state: Dict[str, Any]) -> Dict[str, Any]:
+    fragility = state.get("fragility", 0)
+    failure_streak = state.get("failure_streak", 0)
+    mutation_status = state.get("mutation_status", "idle")
+    open_threads = len(state.get("threads", {}))
+    autonomy_mode = state.get("autonomy_mode", False)
+    free_agency = state.get("free_agency_enabled", False)
+    genesis = state.get("genesis_triggered", False)
+    
+    anomalies = []
+    if fragility > 0.7:
+        anomalies.append("critical_fragility")
+    if failure_streak > 3:
+        anomalies.append("persistent_failures")
+    if open_threads > 10:
+        anomalies.append("thread_overflow")
+    if mutation_status == "blocked":
+        anomalies.append("mutation_stalled")
+    
+    return {
+        "fragility": fragility,
+        "failure_streak": failure_streak,
+        "mutation_status": mutation_status,
+        "open_threads": open_threads,
+        "autonomy_mode": autonomy_mode,
+        "free_agency": free_agency,
+        "genesis_triggered": genesis,
+        "anomalies": anomalies
+    }
