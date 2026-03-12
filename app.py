@@ -1170,32 +1170,67 @@ def generate_suggestions(metrics: Dict[str, Any]) -> Dict[str, Any]:
 
 from typing import Dict, Any
 
-def get_telemetry_data(state: Dict[str, Any]) -> Dict[str, Any]:
-    fragility = state.get("fragility", 0)
-    failure_streak = state.get("failure_streak", 0)
-    mutation_status = state.get("mutation_status", "idle")
-    open_threads = len(state.get("threads", {}))
-    autonomy_mode = state.get("autonomy_mode", False)
-    free_agency = state.get("free_agency_enabled", False)
-    genesis = state.get("genesis_triggered", False)
+from typing import Dict, Any
+from datetime import datetime
+from fastapi.responses import JSONResponse
+
+def utc() -> str:
+    return datetime.utcnow().isoformat() + 'Z'
+
+def nc() -> Dict[str, str]:
+    return {'Cache-Control': 'no-cache, no-store, must-revalidate'}
+
+async def get_telemetry_data() -> Dict[str, Any]:
+    state = engine.get_state()
     
-    anomalies = []
+    # Extract core metrics
+    fragility = state.get('fragility', 0)
+    failure_streak = state.get('failure_streak', 0)
+    mutation_status = engine.mutation_status
+    autonomy_mode = engine.autonomy_mode
+    
+    # Query Guardian for recent failures
+    guardian_logs = await engine.governance.get_recent_failures(limit=10)
+    
+    # Classify errors
+    error_categories = {}
+    repair_suggestions = []
+    
+    for log in guardian_logs:
+        message = log.get('message', '').lower()
+        if 'mutation' in message:
+            error_categories['mutation_failures'] = error_categories.get('mutation_failures', 0) + 1
+        elif 'resource' in message or 'memory' in message:
+            error_categories['resource_exhaustion'] = error_categories.get('resource_exhaustion', 0) + 1
+        else:
+            error_categories['external_anomalies'] = error_categories.get('external_anomalies', 0) + 1
+    
+    # Generate repair suggestions
+    if error_categories.get('mutation_failures', 0) > 3:
+        repair_suggestions.append('Increase mutation rate to overcome adaptation barriers')
+    if error_categories.get('resource_exhaustion', 0) > 2:
+        repair_suggestions.append('Scale resource allocation or optimize memory usage')
+    if failure_streak > 5:
+        repair_suggestions.append('Rollback last change and reinitialize core systems')
     if fragility > 0.7:
-        anomalies.append("critical_fragility")
-    if failure_streak > 3:
-        anomalies.append("persistent_failures")
-    if open_threads > 10:
-        anomalies.append("thread_overflow")
-    if mutation_status == "blocked":
-        anomalies.append("mutation_stalled")
+        repair_suggestions.append('Activate defensive protocols and reduce expansion rate')
     
     return {
-        "fragility": fragility,
-        "failure_streak": failure_streak,
-        "mutation_status": mutation_status,
-        "open_threads": open_threads,
-        "autonomy_mode": autonomy_mode,
-        "free_agency": free_agency,
-        "genesis_triggered": genesis,
-        "anomalies": anomalies
+        'timestamp_utc': utc(),
+        'system_state': {
+            'fragility': fragility,
+            'failure_streak': failure_streak,
+            'mutation_status': mutation_status,
+            'autonomy_mode': autonomy_mode,
+            'free_agency': engine.free_agency_enabled
+        },
+        'error_classification': error_categories,
+        'repair_suggestions': repair_suggestions,
+        'guardian_logs_count': len(guardian_logs),
+        'operational_status': 'DEGRADED' if fragility > 0.5 or failure_streak > 3 else 'OPTIMAL'
     }
+
+@app.get('/runtime/telemetry')
+async def telemetry_endpoint():
+    telemetry_data = await get_telemetry_data()
+    return JSONResponse(telemetry_data, headers=nc())
