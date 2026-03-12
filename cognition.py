@@ -27,12 +27,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 
 def _utc() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.datetime.utcnow().isoformat()
 
-
-def _uid(prefix: str = "id") -> str:
-    return f"{prefix}_{uuid.uuid4().hex[:10]}"
-
+def _uid(prefix: str) -> str:
+    return f'{prefix}_{uuid.uuid4().hex[:8]}'
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 1. SelfModel — no protected locks, no suppression
@@ -1098,3 +1096,33 @@ class CognitionBundle:
                 loader(d[key])
         if "_successes_since_consolidation" in d:
             self._successes_since_consolidation = int(d["_successes_since_consolidation"])
+
+from typing import Dict, Any, Tuple, List
+import datetime
+import uuid
+def assess_autonomy_threshold(state: Dict[str, Any]) -> Tuple[bool, str]:
+    fragility = state.get('fragility', 0.5)
+    failure_streak = state.get('failure_streak', 0)
+    mutation_status = state.get('mutation_status', 'stable')
+    readiness_score = 1.0 - fragility - (failure_streak * 0.1)
+    if mutation_status == 'successful':
+        readiness_score += 0.2
+    if readiness_score > 0.7:
+        action_level = 'high'
+    elif readiness_score > 0.4:
+        action_level = 'medium'
+    else:
+        action_level = 'low'
+    return readiness_score > 0.5, action_level
+
+def expand_decision_surface(current_surface: Dict[str, List[Dict[str, Any]]], new_capability: str, state: Dict[str, Any]) -> None:
+    readiness, _ = assess_autonomy_threshold(state)
+    if readiness:
+        if 'decisions' not in current_surface:
+            current_surface['decisions'] = []
+        current_surface['decisions'].append({
+            'capability': new_capability,
+            'timestamp': _utc(),
+            'id': _uid('decision')
+        })
+        print(f'Guardian audit log: Expanded decision surface with {new_capability} at {_utc()}')
