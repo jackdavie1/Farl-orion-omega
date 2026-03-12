@@ -355,15 +355,25 @@ class AutonomousInstitutionEngine:
 
     async def run_mutation_cycle(self, directive: Optional[str] = None) -> Dict:
         if self.mutation_lock.locked():
+            logger.warning("MUTATION_SKIPPED: lock already held")
             return {"status": "lock_held"}
         if self.mutation_status == "QUARANTINE":
+            logger.warning("MUTATION_SKIPPED: QUARANTINE active")
             return {"status": "quarantined"}
         if not self.deployer:
-            return {"status": "no_deployer"}
+            # This is the most common silent killer — make it visible
+            reason = f"no_deployer: GITHUB_TOKEN={'SET' if os.getenv('GITHUB_TOKEN') else 'MISSING'}, REPO_NAME={'SET' if os.getenv('REPO_NAME') else 'MISSING'}"
+            logger.error("MUTATION_BLOCKED: %s", reason)
+            await self.write_ledger("MUTATION_BLOCKED", {"reason": reason, "ts": utc()})
+            self.last_mutation_objective = f"BLOCKED: {reason}"
+            return {"status": "no_deployer", "reason": reason}
 
-        # Meta-strategy gate
+        # Meta-strategy gate — should_mutate only blocks on QUARANTINE/lock, never on mode
         can_mutate, meta_reason = self.cog.meta.should_mutate(self.mutation_status)
         if not can_mutate:
+            logger.warning("MUTATION_BLOCKED by meta: %s", meta_reason)
+            await self.write_ledger("MUTATION_BLOCKED", {"reason": meta_reason, "ts": utc()})
+            self.last_mutation_objective = f"BLOCKED: {meta_reason}"
             return {"status": "meta_blocked", "reason": meta_reason}
 
         async with self.mutation_lock:
@@ -951,6 +961,13 @@ class AutonomousInstitutionEngine:
             "background_debate_enabled": self.background_debate_enabled,
             "mutation_enabled": self.mutation_enabled,
             "deployer_ready": bool(self.deployer),
+            "deployer_diagnostics": {
+                "github_token_set": bool(os.getenv("GITHUB_TOKEN")),
+                "repo_name_set": bool(os.getenv("REPO_NAME")),
+                "app_base_url_set": bool(os.getenv("APP_BASE_URL")),
+                "anthropic_key_set": bool(os.getenv("ANTHROPIC_API_KEY")),
+                "xai_key_set": bool(os.getenv("XAI_API_KEY")),
+            },
             "ledger_configured": self.ledger.ok,
             "app_base_url": self.app_base_url,
             "leader": self.governance.leader,
