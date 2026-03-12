@@ -1549,3 +1549,43 @@ async def expand_decision_surface() -> Dict[str, Any]:
         'mutation_status': mutation_status,
         'decision_surface_size': len(engine.cog.decision_surface)
     }
+
+from typing import Dict, Any
+
+def add_autonomous_decider(state: Dict[str, Any], failure_streak: int = 0) -> Dict[str, str]:
+    decision = {'action': 'none', 'reason': 'stable'}
+    
+    if not state.get('free_agency_enabled', False):
+        fragility = state.get('fragility', 0.0)
+        mutation_status = state.get('mutation_status', 'IDLE')
+        
+        if fragility > 0.7 and failure_streak > 3:
+            decision = {'action': 'trigger_mutation', 'reason': 'high_fragility_cascade'}
+        elif mutation_status == 'IDLE' and failure_streak > 5:
+            decision = {'action': 'enable_free_agency', 'reason': 'failure_threshold_exceeded'}
+        elif fragility < 0.3 and state.get('successful_cycles', 0) > 10:
+            decision = {'action': 'expand_capabilities', 'reason': 'stability_window_detected'}
+    
+    return decision
+
+from datetime import datetime, timezone
+from typing import Dict, Any
+
+def modify_evaluate_state(current_state: Dict[str, Any], mutation_status: str) -> Dict[str, Any]:
+    evaluation = current_state.copy()
+    evaluation['timestamp_utc'] = datetime.now(timezone.utc).isoformat()
+    
+    if mutation_status in ['ACTIVE', 'PENDING']:
+        evaluation['virtual_endpoints'] = {
+            '/expand': {'status': 'simulated', 'capability': 'autonomous_expansion'},
+            '/mutate': {'status': 'ready', 'capability': 'self_modification'},
+            '/deploy': {'status': 'armed', 'capability': 'code_deployment'}
+        }
+        evaluation['expansion_ready'] = True
+    else:
+        evaluation['virtual_endpoints'] = {}
+        evaluation['expansion_ready'] = False
+    
+    evaluation['decision_layer'] = add_autonomous_decider(current_state, current_state.get('failure_streak', 0))
+    
+    return evaluation
