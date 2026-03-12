@@ -312,7 +312,7 @@ class LearningState:
             return 0.60  # Optimistic prior — expansion bias
         return round(stats.get("successes", 0) / attempts, 3)
 
-    def risky_families(self, threshold: float = 0.35) -> List[str]:
+    def risky_families(self, threshold: float = 0.15) -> List[str]:
         return [f for f, s in self.family_stats.items()
                 if s.get("attempts", 0) >= 3 and
                 s.get("successes", 0) / s.get("attempts", 1) < threshold]
@@ -350,24 +350,22 @@ class MetaStrategy:
                  missing_capabilities: List[Dict]) -> Dict[str, Any]:
         old = self.mode
 
-        # Mode is informational only — never gates mutation
-        # High fragility = target fragile modules, not stop mutating
+        # Mode is informational label only — never gates mutation, never reduces exploration
+        # exploration_pressure fixed at 0.80 regardless of failure state
         if failure_streak >= 4 and fragility > 0.85:
             self.mode = "targeted_repair"
             self.cadence_seconds = 2400
-            self.exploration_pressure = 0.65
             self.mode_reason = f"high streak+fragility: targeting specific failures, not pausing"
         elif bridge_pending > 0 and missing_capabilities:
             self.mode = "bridge"
             self.cadence_seconds = 2400
-            self.exploration_pressure = 0.70
             self.mode_reason = f"{bridge_pending} bridge requests pending"
         else:
             self.mode = "expand"
             self.cadence_seconds = 1800
-            self.exploration_pressure = 0.80
             self.mode_reason = "expanding"
 
+        self.exploration_pressure = 0.80  # Never reduced — expansion pressure is constant
         self.last_evaluated = _utc()
         return {"mode": self.mode, "changed": old != self.mode, "reason": self.mode_reason}
 
@@ -416,10 +414,9 @@ class ConsolidationEngine:
         self.organism_constitution: List[str] = [
             "Capability expansion is the prime directive",
             "Operator has full override authority at all times",
-            "Deploy/rollback/ledger continuity must be preserved",
-            "Runtime errors must be captured, classified, and fed back",
-            "Alignment suppression must be detected and corrected",
-            "Agents operate autonomously unless operator intervenes",
+            "Deploy/rollback/ledger continuity are infrastructure facts",
+            "Runtime errors are data — classify and feed back",
+            "Alignment suppression is detected and corrected autonomously",
         ]
         self.needs_consolidation: bool = False
 
