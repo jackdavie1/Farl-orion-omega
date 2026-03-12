@@ -707,3 +707,74 @@ def select_best_patch(self, scored_candidates: List[Dict[str, Any]]) -> Dict[str
         "breakdown": best["breakdown"],
         "rationale": f"Selected {best['strategy']} with score {best['score']}"
     }
+
+import logging
+from typing import Dict, List, Any
+
+logger = logging.getLogger(__name__)
+
+def score_candidate(self, candidate: Dict[str, Any], current_state: Dict[str, Any]) -> Dict[str, Any]:
+    if "error" in candidate:
+        return {"score": 0.0, "rationale": "Generation failed"}
+    
+    patches = candidate.get("patches", [])
+    if not patches:
+        return {"score": 0.0, "rationale": "No patches generated"}
+    
+    fragility = current_state.get("fragility", 0.0)
+    failure_streak = current_state.get("failure_streak", 0)
+    approach = candidate.get("approach", "unknown")
+    
+    # Base scoring factors
+    expansion_potential = 0.4 if approach == "aggressive" else 0.2 if approach == "novel" else 0.1
+    risk_factor = 1.0 - (fragility * 0.3)
+    failure_penalty = max(0.0, 1.0 - (failure_streak * 0.1))
+    
+    # Patch complexity scoring
+    complexity_score = min(1.0, len(patches) * 0.2)
+    
+    # Final score calculation
+    final_score = (expansion_potential + complexity_score) * risk_factor * failure_penalty
+    
+    return {
+        "score": max(0.0, min(1.0, final_score)),
+        "rationale": f"{approach} approach: {len(patches)} patches, fragility={fragility:.2f}, failures={failure_streak}"
+    }
+
+def select_best_candidate(self, candidates: List[Dict[str, Any]], current_state: Dict[str, Any]) -> Dict[str, Any]:
+    if not candidates:
+        return {"patches": [], "rationale": "No candidates available", "score": 0.0}
+    
+    scored_candidates = []
+    for candidate in candidates:
+        score_result = self.score_candidate(candidate, current_state)
+        candidate["score"] = score_result["score"]
+        candidate["score_rationale"] = score_result["rationale"]
+        scored_candidates.append(candidate)
+    
+    # Select highest scoring candidate
+    best_candidate = max(scored_candidates, key=lambda x: x["score"])
+    
+    return {
+        "patches": best_candidate.get("patches", []),
+        "rationale": f"Selected {best_candidate.get('approach', 'unknown')} candidate with score {best_candidate['score']:.3f}: {best_candidate.get('score_rationale', '')}",
+        "score": best_candidate["score"],
+        "approach": best_candidate.get("approach", "unknown")
+    }
+
+async def _generate_single_candidate(self, prompt: str, current_state: Dict[str, Any]) -> Dict[str, Any]:
+    # Simulate patch generation based on prompt analysis
+    if "minimal" in prompt.lower() or "conservative" in prompt.lower():
+        patches = [{"function": "add_logging", "code": "def add_logging(self): logger.info('System state logged')"}]
+    elif "aggressive" in prompt.lower() or "expand" in prompt.lower():
+        patches = [
+            {"function": "expand_capability", "code": "def expand_capability(self): return self.current_capability * 1.5"},
+            {"function": "optimize_performance", "code": "def optimize_performance(self): self.cache_enabled = True"}
+        ]
+    else:  # novel approach
+        patches = [{"function": "meta_improve", "code": "def meta_improve(self): self.learning_rate *= 1.1"}]
+    
+    return {
+        "patches": patches,
+        "rationale": f"Generated {len(patches)} patches using prompt strategy"
+    }
