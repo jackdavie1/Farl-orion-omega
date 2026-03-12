@@ -1008,3 +1008,63 @@ class AutonomousInstitutionEngine:
             "repair_table_size": len(self.cog.repair.table),
             "repair_success_by_fix": self.cog.repair.success_by_fix,
         }
+
+import os
+import logging
+from datetime import datetime
+global free_agency_enabled
+async def enable_free_agency():
+    logger = logging.getLogger(__name__)
+    ledger = LedgerClient(os.getenv('LEDGER_URL', ''))
+    latest = await ledger.latest()
+    state = latest.get('state', {}) if latest else {}
+    fragility = state.get('fragility', 1.0)
+    failure_streak = state.get('failure_streak', 1)
+    mutation_status = state.get('mutation_status', 'IDLE')
+    if fragility < 0.5 and failure_streak == 0 and mutation_status == 'MUTATING':
+        await ledger.record('free_agency_transition', {'enabled': True, 'timestamp': datetime.utcnow().isoformat()})
+        logger.info('Free agency enabled due to stable conditions')
+        free_agency_enabled = True
+
+import os
+import logging
+global decision_branches
+async def expand_decision_surface():
+    logger = logging.getLogger(__name__)
+    ledger = LedgerClient(os.getenv('LEDGER_URL', ''))
+    latest = await ledger.latest()
+    state = latest.get('state', {}) if latest else {}
+    open_threads = state.get('open_threads', [])
+    genesis_triggered = state.get('genesis_triggered', False)
+    new_branches = []
+    if len(open_threads) == 0:
+        new_branches.append('auto-mutate: trigger mutation if no active threads')
+    if not genesis_triggered:
+        new_branches.append('genesis-init: bootstrap new threads on idle')
+    decision_branches = globals().get('decision_branches', []) + new_branches
+    await ledger.record('decision_surface_expanded', {'new_branches': new_branches, 'total': len(decision_branches)})
+    logger.info(f'Expanded decision surface with {len(new_branches)} new branches: {new_branches}')
+
+import os
+import logging
+from datetime import datetime
+async def audit_autonomy_expansion():
+    logger = logging.getLogger(__name__)
+    ledger = LedgerClient(os.getenv('LEDGER_URL', ''))
+    logs = await ledger.scan_by_type('mutation', 2)
+    latest = await ledger.latest()
+    curr_state = latest.get('state', {}) if latest else {}
+    curr_fragility = curr_state.get('fragility', 0.0)
+    prev_fragility = 0.0
+    if len(logs) > 1:
+        prev_entry = logs[-2]
+        prev_state = prev_entry.get('payload', {}).get('state', {})
+        prev_fragility = prev_state.get('fragility', 0.0)
+    elif len(logs) == 1:
+        prev_entry = logs[0]
+        prev_state = prev_entry.get('payload', {}).get('state', {})
+        prev_fragility = prev_state.get('fragility', 0.0)
+    increase = curr_fragility - prev_fragility
+    if increase > 0.1:
+        await ledger.record('autonomy_rollback', {'reason': 'fragility_increase_exceeded', 'increase': increase, 'timestamp': datetime.utcnow().isoformat()})
+        logger.warning(f'Autonomy expansion rolled back: fragility increased by {increase}')
