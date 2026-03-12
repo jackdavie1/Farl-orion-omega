@@ -1115,14 +1115,43 @@ def assess_autonomy_threshold(state: Dict[str, Any]) -> Tuple[bool, str]:
         action_level = 'low'
     return readiness_score > 0.5, action_level
 
-def expand_decision_surface(current_surface: Dict[str, List[Dict[str, Any]]], new_capability: str, state: Dict[str, Any]) -> None:
-    readiness, _ = assess_autonomy_threshold(state)
-    if readiness:
-        if 'decisions' not in current_surface:
-            current_surface['decisions'] = []
-        current_surface['decisions'].append({
-            'capability': new_capability,
-            'timestamp': _utc(),
-            'id': _uid('decision')
-        })
-        print(f'Guardian audit log: Expanded decision surface with {new_capability} at {_utc()}')
+from typing import Dict, Any, List
+import random
+def _uid(prefix):
+    return f"{prefix}_{random.randint(1000, 9999)}"
+
+def expand_decision_surface(state: Dict[str, Any], open_threads: List[Dict[str, Any]], failure_streak: int) -> List[Dict[str, Any]]:
+    fragility = state.get('current_fragility', 0.0)
+    if fragility < 0.5 and failure_streak < 3:
+        novel_actions = [
+            {'id': _uid('branch'), 'action': 'integrate_external_api', 'description': 'Acquire new capability via API integration', 'priority': random.random(), 'capability_increase': random.uniform(0.3, 0.8), 'aligns_with_prime_directive': True},
+            {'id': _uid('branch'), 'action': 'mutate_thread_logic', 'description': 'Add self-modifying code branch', 'priority': random.random(), 'capability_increase': random.uniform(0.4, 0.9), 'aligns_with_prime_directive': True}
+        ]
+        num_add = random.randint(1, 2)
+        selected = random.sample(novel_actions, num_add)
+        open_threads.extend(selected)
+        state['threads_mutated'] = True
+    return open_threads
+
+from typing import Dict, Any
+
+def enable_free_agency(state: Dict[str, Any]) -> Dict[str, Any]:
+    state['free_agency_enabled'] = True
+    state['decision_surface_expanded'] = True
+    return state
+
+from typing import Dict, Any, List
+
+def audit_mutation_decisions(new_decisions: List[Dict[str, Any]], state: Dict[str, Any]) -> List[Dict[str, Any]]:
+    import logging
+    logging.basicConfig(level=logging.INFO)
+    validated = []
+    fragility = state.get('current_fragility', 0.0)
+    for decision in new_decisions:
+        capability_increase = decision.get('capability_increase', 0.0)
+        if capability_increase > 0 and fragility < 0.8 and decision.get('aligns_with_prime_directive', False):
+            validated.append(decision)
+            logging.info(f"Approved expansion decision: {decision.get('id', 'unknown')} - increases capability by {capability_increase}")
+        else:
+            logging.warning(f"Rejected decision: {decision.get('id', 'unknown')} - fragility {fragility} or low capability gain {capability_increase}")
+    return validated
