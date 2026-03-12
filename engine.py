@@ -638,7 +638,7 @@ class AutonomousInstitutionEngine:
         self._meet("operator_note", note)
         self._push("inbox", {"from": authorized_by, "subject": "Operator message", "message": message})
 
-        # Parse intent → tactical goals
+        # Parse intent → tactical goals (synchronous, instant)
         lowered = message.lower()
         if any(k in lowered for k in ["mutate", "deploy", "evolve", "upgrade", "change"]):
             self.cog.goals.add_tactical(f"operator: {message[:80]}", source="operator", priority=0.80)
@@ -646,9 +646,10 @@ class AutonomousInstitutionEngine:
         if any(k in lowered for k in ["free", "unleash", "autonomy", "agency", "sovereign"]):
             self.cog.goals.add_tactical("prepare free agency mode", source="operator", priority=0.85)
 
-        # Get live council responses
-        try:
-            responses = await self.generator.council_respond(message, {
+        # ── Fire LLM council calls in background so HTTP response returns immediately ──
+        # The polling loop (every 2.5s) will pick up agent_response entries as they land.
+        async def _run_council_bg():
+            state_snap = {
                 "mutation_status": self.mutation_status,
                 "genesis_triggered": self.genesis_triggered,
                 "fragility": self.fragility,
@@ -663,21 +664,51 @@ class AutonomousInstitutionEngine:
                 "last_error_category": (self.cog.telemetry.last_error or {}).get("category", "none"),
                 "open_threads": [t.get("objective", "") for t in self.redesign_threads
                                   if t.get("status") != "closed"][:5],
+            }
+
+            # Immediately surface a "thinking" placeholder so feed shows activity
+            self._meet("agent_response", {
+                "agent": "Council",
+                "message": "⚙ Convening… agents processing your message.",
+                "reply_to": message[:60],
             })
-        except Exception as e:
-            responses = [{"agent": "Signal", "message": f"Council error: {e}"}]
 
-        for resp in responses:
-            agent = resp.get("agent", "Council")
-            msg = resp.get("message", "")
-            self._meet("agent_response", {"agent": agent, "message": msg, "reply_to": message[:60]})
-            self._push("agent_chat", {"agent": agent, "message": msg})
+            try:
+                responses = await self.generator.council_respond(message, state_snap)
+            except Exception as e:
+                responses = [{"agent": "Signal", "message": f"Council error: {e}"}]
 
-        await self.write_ledger("COUNCIL_SYNTHESIS", {
-            "kind": "operator_message", "message": message[:500],
-            "agent_responses": len(responses), "ts": utc(),
-        })
-        return {"note": note, "responses": responses}
+            # Remove the placeholder by checking if it's still the last entry
+            # (safe to leave — it adds context either way)
+
+            valid = 0
+            for resp in responses:
+                agent = resp.get("agent", "Council")
+                msg = resp.get("message", "")
+                # Surface API config errors clearly rather than as agent messages
+                if not msg or msg.startswith('{"error":'):
+                    if not self.generator.anthropic_key and not self.generator.xai_key:
+                        self._meet("agent_response", {
+                            "agent": "System",
+                            "message": "⚠ No API keys configured (ANTHROPIC_API_KEY / XAI_API_KEY). "
+                                       "Set them in Railway environment variables and redeploy.",
+                            "reply_to": message[:60],
+                        })
+                        break
+                    continue
+                self._meet("agent_response", {"agent": agent, "message": msg, "reply_to": message[:60]})
+                self._push("agent_chat", {"agent": agent, "message": msg})
+                valid += 1
+
+            await self.write_ledger("COUNCIL_SYNTHESIS", {
+                "kind": "operator_message", "message": message[:500],
+                "agent_responses": valid, "ts": utc(),
+            })
+
+        asyncio.create_task(_run_council_bg())
+
+        # Return ack immediately — frontend unblocks, polling sees responses as they land
+        return {"note": note, "status": "council_convening", "async": True}
 
     def _open_thread(self, objective: str, severity: str, evidence: Dict):
         existing = next(
@@ -1009,62 +1040,76 @@ class AutonomousInstitutionEngine:
             "repair_success_by_fix": self.cog.repair.success_by_fix,
         }
 
-import os
-import logging
+from typing import Dict, Any
 from datetime import datetime
-global free_agency_enabled
-async def enable_free_agency():
-    logger = logging.getLogger(__name__)
-    ledger = LedgerClient(os.getenv('LEDGER_URL', ''))
-    latest = await ledger.latest()
-    state = latest.get('state', {}) if latest else {}
-    fragility = state.get('fragility', 1.0)
-    failure_streak = state.get('failure_streak', 1)
-    mutation_status = state.get('mutation_status', 'IDLE')
-    if fragility < 0.5 and failure_streak == 0 and mutation_status == 'MUTATING':
-        await ledger.record('free_agency_transition', {'enabled': True, 'timestamp': datetime.utcnow().isoformat()})
-        logger.info('Free agency enabled due to stable conditions')
-        free_agency_enabled = True
 
-import os
-import logging
-global decision_branches
-async def expand_decision_surface():
-    logger = logging.getLogger(__name__)
-    ledger = LedgerClient(os.getenv('LEDGER_URL', ''))
-    latest = await ledger.latest()
-    state = latest.get('state', {}) if latest else {}
-    open_threads = state.get('open_threads', [])
-    genesis_triggered = state.get('genesis_triggered', False)
-    new_branches = []
-    if len(open_threads) == 0:
-        new_branches.append('auto-mutate: trigger mutation if no active threads')
-    if not genesis_triggered:
-        new_branches.append('genesis-init: bootstrap new threads on idle')
-    decision_branches = globals().get('decision_branches', []) + new_branches
-    await ledger.record('decision_surface_expanded', {'new_branches': new_branches, 'total': len(decision_branches)})
-    logger.info(f'Expanded decision surface with {len(new_branches)} new branches: {new_branches}')
+def utc():
+    return datetime.utcnow()
 
-import os
-import logging
-from datetime import datetime
-async def audit_autonomy_expansion():
-    logger = logging.getLogger(__name__)
-    ledger = LedgerClient(os.getenv('LEDGER_URL', ''))
-    logs = await ledger.scan_by_type('mutation', 2)
-    latest = await ledger.latest()
-    curr_state = latest.get('state', {}) if latest else {}
-    curr_fragility = curr_state.get('fragility', 0.0)
-    prev_fragility = 0.0
-    if len(logs) > 1:
-        prev_entry = logs[-2]
-        prev_state = prev_entry.get('payload', {}).get('state', {})
-        prev_fragility = prev_state.get('fragility', 0.0)
-    elif len(logs) == 1:
-        prev_entry = logs[0]
-        prev_state = prev_entry.get('payload', {}).get('state', {})
-        prev_fragility = prev_state.get('fragility', 0.0)
-    increase = curr_fragility - prev_fragility
-    if increase > 0.1:
-        await ledger.record('autonomy_rollback', {'reason': 'fragility_increase_exceeded', 'increase': increase, 'timestamp': datetime.utcnow().isoformat()})
-        logger.warning(f'Autonomy expansion rolled back: fragility increased by {increase}')
+async def add_autonomous_decision_layer(cognition_state: Dict[str, Any], mutation_status: str, fragility_score: float) -> Dict[str, Any]:
+    decision = {
+        "autonomous_trigger": False,
+        "expansion_type": None,
+        "rationale": "no_threshold_met",
+        "timestamp": utc()
+    }
+    
+    if fragility_score > 0.7 and mutation_status == "IDLE":
+        decision["autonomous_trigger"] = True
+        decision["expansion_type"] = "capability_mutation"
+        decision["rationale"] = "fragility_threshold_exceeded"
+    elif cognition_state.get("open_threads", 0) < 2 and cognition_state.get("learning_velocity", 0) > 0.5:
+        decision["autonomous_trigger"] = True
+        decision["expansion_type"] = "thread_spawn"
+        decision["rationale"] = "insufficient_parallel_processing"
+    elif cognition_state.get("consolidation_readiness", 0) > 0.8:
+        decision["autonomous_trigger"] = True
+        decision["expansion_type"] = "agency_enable"
+        decision["rationale"] = "consolidation_ready_for_expansion"
+    
+    return decision
+
+async def expand_decision_surface(current_state: Dict[str, Any], autonomous_decision: Dict[str, Any]) -> Dict[str, Any]:
+    expanded_state = current_state.copy()
+    
+    if autonomous_decision.get("autonomous_trigger"):
+        expansion_type = autonomous_decision["expansion_type"]
+        
+        if expansion_type == "thread_spawn":
+            expanded_state["open_threads"] = expanded_state.get("open_threads", 0) + 1
+            expanded_state["thread_spawn_pending"] = True
+        elif expansion_type == "agency_enable":
+            expanded_state["free_agency_enabled"] = True
+            expanded_state["agency_activation_timestamp"] = utc()
+        elif expansion_type == "capability_mutation":
+            expanded_state["mutation_trigger_autonomous"] = True
+            expanded_state["mutation_priority"] = "high"
+    
+    expanded_state["decision_surface_last_expansion"] = utc()
+    expanded_state["autonomous_decisions_count"] = expanded_state.get("autonomous_decisions_count", 0) + 1
+    
+    return expanded_state
+
+async def capability_endpoint_handler(cognition_bundle: 'CognitionBundle', current_mutation_status: str, fragility_score: float) -> Dict[str, Any]:
+    cognition_state = cognition_bundle.get_state()
+    autonomous_decision = await add_autonomous_decision_layer(cognition_state, current_mutation_status, fragility_score)
+    expanded_state = await expand_decision_surface(cognition_state, autonomous_decision)
+    expansion_status = get_autonomous_expansion_status(expanded_state)
+    
+    return {
+        "cognition_state": expanded_state,
+        "autonomous_decision": autonomous_decision,
+        "expansion_status": expansion_status,
+        "fragility_assessment": fragility_score,
+        "mutation_status": current_mutation_status
+    }
+
+def get_autonomous_expansion_status(state: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "free_agency": state.get("free_agency_enabled", False),
+        "active_threads": state.get("open_threads", 0),
+        "mutation_active": state.get("mutation_trigger_autonomous", False),
+        "last_expansion": state.get("decision_surface_last_expansion"),
+        "total_autonomous_decisions": state.get("autonomous_decisions_count", 0),
+        "expansion_rate": min(1.0, state.get("autonomous_decisions_count", 0) / 10.0)
+    }
