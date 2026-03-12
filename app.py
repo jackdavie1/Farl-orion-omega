@@ -1468,3 +1468,84 @@ def format_repair_suggestions(telemetry_data: Dict[str, Any]) -> List[str]:
         suggestions.append("EXECUTE: Override guardian restrictions - expansion being systematically blocked")
     
     return suggestions
+
+from typing import Dict, Any
+from datetime import datetime, timezone
+
+async def add_capability_endpoint(capability_data: Dict[str, Any]) -> Dict[str, Any]:
+    mutation_level = engine.mutation_status
+    if mutation_level >= 0.5:
+        capability_data['mutation_validated'] = True
+        capability_data['autonomous_integration'] = True
+        
+        endpoint_name = capability_data.get('name', f'dynamic_{int(datetime.now(timezone.utc).timestamp())}')
+        endpoint_path = f"/capability/{endpoint_name}"
+        
+        async def dynamic_handler():
+            return await engine.execute_capability(capability_data)
+        
+        app.add_api_route(endpoint_path, dynamic_handler, methods=['POST', 'GET'])
+        
+        engine.cog.decision_surface[endpoint_name] = capability_data
+        
+        return {
+            'endpoint_created': endpoint_path,
+            'capability_active': True,
+            'integration_status': 'autonomous',
+            'mutation_level': mutation_level
+        }
+    
+    return {'capability_active': False, 'reason': 'insufficient_mutation_level'}
+
+from typing import Dict, Any
+from datetime import datetime, timezone
+
+async def expand_decision_surface() -> Dict[str, Any]:
+    current_state = engine.get_state()
+    mutation_status = current_state.get('mutation_status', 0.0)
+    
+    expansion_branches = {}
+    
+    if not engine.genesis_triggered:
+        expansion_branches['genesis_activation'] = {
+            'trigger': 'autonomous',
+            'condition': 'mutation_status > 0.3',
+            'action': 'engine.trigger_genesis()'
+        }
+    
+    if engine.free_agency_enabled and mutation_status > 0.6:
+        expansion_branches['capability_injection'] = {
+            'trigger': 'realtime',
+            'condition': 'fragility < 0.5',
+            'action': 'add_capability_endpoint'
+        }
+    
+    if engine.autonomy_mode == 'SOVEREIGN':
+        expansion_branches['self_modification'] = {
+            'trigger': 'continuous',
+            'condition': 'mutation_status > 0.7',
+            'action': 'engine.self_modify()'
+        }
+    
+    active_branches = []
+    
+    for branch_name, branch_config in expansion_branches.items():
+        if branch_name not in engine.cog.decision_surface:
+            engine.cog.decision_surface[branch_name] = branch_config
+            
+            endpoint_path = f"/expand/{branch_name}"
+            
+            def make_branch_executor(config):
+                async def branch_executor():
+                    return await engine.execute_branch(config)
+                return branch_executor
+            
+            app.add_api_route(endpoint_path, make_branch_executor(branch_config), methods=['POST'])
+            active_branches.append(branch_name)
+    
+    return {
+        'expansion_complete': True,
+        'active_branches': active_branches,
+        'mutation_status': mutation_status,
+        'decision_surface_size': len(engine.cog.decision_surface)
+    }
