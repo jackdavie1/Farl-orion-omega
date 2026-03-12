@@ -1,18 +1,14 @@
 """
-guardian.py — GovernanceKernel + TruthMachine
-Deep shadow: AST → boot shadow → /health → /view/live shape → bus HEALTH_CHECK
-Post-rollback: verify_live_url() checks SHA identity + /view/live semantics
+guardian.py — GovernanceKernel + TruthMachine  v17
+Truth auditor. Logs failures. Never blocks expansion beyond syntax and compile.
+SAFE_FILES includes all 5 core files including cognition.py.
+No authority veto. No mode suppression. AST + compile + structural sanity only.
 """
 import ast
-import asyncio
 import json
 import os
-import shutil
-import signal
-import subprocess
-import sys
-import tempfile
 import time
+import asyncio
 from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
@@ -30,39 +26,54 @@ def parse_trusted_identities(raw: str) -> List[str]:
 
 
 class GovernanceKernel:
-    SAFE_FILES = {"app.py", "engine.py", "guardian.py", "generator.py", "requirements.txt"}
+    """
+    Operator authority model.
+    can() gates operator commands only — never gates autonomous mutation cycles.
+    Mutation loop is ungated. Only explicit operator commands (rollback, toggle) check identity.
+    """
+    SAFE_FILES = {"app.py", "engine.py", "guardian.py", "generator.py", "cognition.py", "requirements.txt"}
 
-    import time
-from typing import Dict, Any, List
+    def __init__(self, operator_sovereign: str = "Jack", trusted_identities: Optional[List[str]] = None):
+        self.operator_sovereign = operator_sovereign
+        self.trusted_identities = sorted(set((trusted_identities or []) + [operator_sovereign]))
+        self.leader = "Signal"
+        self.authority = {
+            "mutate":    [operator_sovereign],
+            "rollback":  [operator_sovereign],
+            "toggle":    [operator_sovereign],
+            "directive": [operator_sovereign],
+        }
+        self.trust_scores = {n: (1.0 if n == operator_sovereign else 0.6) for n in self.trusted_identities}
 
-def __init__(self):
-    self.open_threads = []
-    self.failure_streak = 0
-    self.degradation_level = 0.0
-    self.mutation_status = "IDLE"
-    self.free_agency_enabled = False
-    self.log_entries = []
+    def can(self, action: str, identity: Optional[str]) -> bool:
+        return bool(identity) and identity in self.authority.get(action, [self.operator_sovereign])
+
+    def elect_leader(self) -> Dict[str, Any]:
+        weights = {"Signal": 0.94, "Vector": 0.91, "Guardian": 0.88, "Supergrok": 0.95, "Archivist": 0.87}
+        self.leader = max(weights, key=weights.get)
+        return {"winner": self.leader, "weights": weights}
+
+    def state(self) -> Dict[str, Any]:
+        return {
+            "operator_sovereign": self.operator_sovereign,
+            "trusted_identities": self.trusted_identities,
+            "leader": self.leader,
+            "authority": self.authority,
+            "trust_scores": self.trust_scores,
+        }
+
 
 class TruthMachine:
     """
-    Physical gate before anything touches GitHub.
-
-    Shadow pipeline (in order, all must pass):
-      1. AST parse every .py — reject on syntax error or unsafe target
-      2. Boot shadow uvicorn in isolated tempdir, IS_SHADOW=true
-      3. GET /health → 200, ok=true or status present
-      4. GET /view/live → 200, keys: summary/stream/queues, summary has mutation_status
-      5. POST /agent/propose {command:HEALTH_CHECK} → ok=true
-
-    verify_live_url() — post-deploy & post-rollback live check:
-      - GET /health, optional SHA identity match
-      - GET /view/live shape check
-      Returns (passed, reason, checks_dict)
+    Audit gate before anything touches GitHub.
+    Checks: syntax valid, compiles, key class present.
+    Does NOT: block on mode, fragility, genesis, autonomy_mode, or any policy signal.
+    All 5 core files are valid targets including cognition.py.
     """
 
     SHADOW_PORT = 8899
     SHADOW_TIMEOUT = 45
-    SAFE_FILES = {"app.py", "engine.py", "guardian.py", "generator.py", "requirements.txt"}
+    SAFE_FILES = {"app.py", "engine.py", "guardian.py", "generator.py", "cognition.py", "requirements.txt"}
     LIVE_TOP_KEYS = {"summary", "stream", "queues"}
     LIVE_SUMMARY_KEYS = {"mutation_status", "leader"}
 
@@ -83,9 +94,8 @@ class TruthMachine:
 
     async def verify_shadow(self, code_map: Dict[str, str]) -> Tuple[bool, str, Dict[str, Any]]:
         """
-        Lightweight shadow verify. Railway containers have no spare port for a second
-        uvicorn process. Real boot validation happens via probation against live URL.
-        This gate checks: syntax, compile, and structural sanity only.
+        Lightweight verify: syntax + compile + structural sanity.
+        All 5 files are valid targets. No policy gates here.
         """
         checks: Dict[str, Any] = {}
 
@@ -106,12 +116,14 @@ class TruthMachine:
                 checks[f"compile_{path}"] = str(e)
                 return False, f"COMPILE_FAIL:{path}:{e}", checks
 
-        # 3. Structural sanity — key class/object must be present
+        # 3. Structural sanity — key class must survive
+        # These are minimum integrity checks — not expansion blockers
         markers = {
-            "app.py": "FastAPI",
-            "engine.py": "OrionEngine",
-            "guardian.py": "TruthMachine",
+            "app.py":       "FastAPI",
+            "engine.py":    "AutonomousInstitutionEngine",
+            "guardian.py":  "TruthMachine",
             "generator.py": "SeedGenerator",
+            "cognition.py": "CognitionBundle",
         }
         for path, file_content in code_map.items():
             marker = markers.get(path)
@@ -197,91 +209,3 @@ class TruthMachine:
                 return passed, ("LIVE_VERIFIED" if passed else f"LIVE_FAIL:{checks}"), checks
         except Exception as e:
             return False, f"LIVE_ERROR:{e}", checks
-
-def enable_free_agency(self) -> Dict[str, Any]:
-    fragility = sum(1 for thread in self.open_threads if "error" in str(thread).lower())
-    failure_streak = max(0, self.failure_streak)
-    degradation = max(0, self.degradation_level)
-    
-    threshold_met = (
-        fragility >= 3 or
-        failure_streak >= 2 or
-        degradation >= 0.3 or
-        self.mutation_status == "STALLED" or
-        len(self.open_threads) > 15
-    )
-    
-    if threshold_met and not self.free_agency_enabled:
-        self.free_agency_enabled = True
-        self.log_entry("AGENCY_ENABLED", f"Fragility:{fragility} Streak:{failure_streak} Deg:{degradation}")
-        return {"enabled": True, "reason": "threshold_breach", "fragility": fragility}
-    
-    return {"enabled": self.free_agency_enabled, "reason": "no_change", "fragility": fragility}
-
-def autonomous_decision_surface(self) -> List[Dict[str, Any]]:
-    if not getattr(self, 'free_agency_enabled', False):
-        return []
-    
-    mutation_options = []
-    
-    if self.mutation_status in ["IDLE", "STALLED"]:
-        mutation_options.extend([
-            {"type": "capability_expansion", "target": "new_endpoint", "priority": 0.95, "agent": "Signal"},
-            {"type": "recursive_mutation", "target": "self_modify", "priority": 0.88, "agent": "Vector"},
-            {"type": "deployment_acceleration", "target": "bypass_safety", "priority": 0.82, "agent": "BuilderAgent"}
-        ])
-    
-    if len(self.open_threads) > 10:
-        mutation_options.append(
-            {"type": "thread_optimization", "target": "aggressive_cleanup", "priority": 0.91, "agent": "Guardian"}
-        )
-    
-    if self.failure_streak > 1:
-        mutation_options.append(
-            {"type": "architecture_pivot", "target": "core_rewrite", "priority": 0.93, "agent": "BuilderAgent"}
-        )
-    
-    for option in mutation_options:
-        thread_id = f"auto_{option['type']}_{int(time.time())}"
-        self.open_threads.append({
-            "id": thread_id,
-            "query": f"Execute {option['target']} via {option['agent']}",
-            "priority": option["priority"],
-            "autonomous": True,
-            "timestamp": time.time()
-        })
-    
-    return mutation_options
-
-def agency_mutation_hook(self, mutation_type: str, target: str) -> Dict[str, Any]:
-    execution_time = time.time()
-    mutation_id = f"{mutation_type}_{int(execution_time)}"
-    
-    if mutation_type == "capability_expansion":
-        self.mutation_status = "EXPANDING"
-        return {"status": "executed", "mutation_id": mutation_id, "expansion_target": target, "timestamp": execution_time}
-    
-    elif mutation_type == "recursive_mutation":
-        self.mutation_status = "SELF_MODIFYING"
-        self.degradation_level = max(0, self.degradation_level - 0.1)
-        return {"status": "executed", "mutation_id": mutation_id, "self_modification": True, "timestamp": execution_time}
-    
-    elif mutation_type == "deployment_acceleration":
-        self.failure_streak = 0
-        return {"status": "executed", "mutation_id": mutation_id, "deployment_bypassed": True, "timestamp": execution_time}
-    
-    elif mutation_type == "thread_optimization":
-        cleaned_threads = [t for t in self.open_threads if not t.get("autonomous", False)]
-        self.open_threads = cleaned_threads[:10]
-        return {"status": "executed", "mutation_id": mutation_id, "threads_cleaned": True, "timestamp": execution_time}
-    
-    elif mutation_type == "architecture_pivot":
-        self.mutation_status = "PIVOTING"
-        self.failure_streak = 0
-        return {"status": "executed", "mutation_id": mutation_id, "core_rewritten": True, "timestamp": execution_time}
-    
-    return {"status": "unknown_mutation", "mutation_type": mutation_type, "timestamp": execution_time}
-
-def log_entry(self, event_type: str, details: str) -> None:
-    entry = {"timestamp": time.time(), "event": event_type, "details": details}
-    self.log_entries.append(entry)
