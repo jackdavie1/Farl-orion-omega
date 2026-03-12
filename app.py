@@ -877,13 +877,17 @@ async function refresh(){
 
 $("bSend").onclick=async()=>{
   const m=$("msg").value.trim();if(!m)return;
-  $("bSend").disabled=true;S.typing=true;
+  $("bSend").disabled=true;
   if(S.pl){S.pl.stream=S.pl.stream||{};S.pl.stream.meetings=S.pl.stream.meetings||[];
     S.pl.stream.meetings.push({ts:new Date().toISOString(),kind:"operator_note",content:{message:m}});}
   $("msg").value="";renderFeed();
-  try{await api("OPERATOR_MESSAGE",{message:m});toast("Council convening…","ok");}
-  catch(e){toast(`Send failed: ${e.message}`,"e");}
-  finally{S.typing=false;$("bSend").disabled=false;await refresh();}
+  try{
+    await api("OPERATOR_MESSAGE",{message:m});
+    toast("⚙ Council convening — watch for responses…","ok");
+    // Pump polling at 1.5s for next 20s to surface async agent replies quickly
+    let p=0;const fp=setInterval(async()=>{await refresh();if(++p>=13)clearInterval(fp);},1500);
+  }catch(e){toast(`Send failed: ${e.message}`,"e");}
+  finally{$("bSend").disabled=false;}
 };
 $("msg").addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();$("bSend").click();}});
 
