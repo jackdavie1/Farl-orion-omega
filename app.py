@@ -466,94 +466,140 @@ VIEW_HTML = r"""<!doctype html>
 <head>
 <meta charset="utf-8"/>
 <title>FARL — Orion Apex</title>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
 <meta http-equiv="Cache-Control" content="no-cache,no-store,must-revalidate"/>
 <style>
 :root{
-  --bg:#050813;--bg2:#070c1a;--panel:rgba(7,12,34,.9);--line:rgba(100,130,255,.13);
+  --bg:#050813;--bg2:#070c1a;--panel:rgba(7,12,34,.92);--line:rgba(100,130,255,.13);
   --text:#edf0ff;--muted:#7a87b8;--bright:#9fb5ff;--good:#6df0aa;--warn:#ffd060;--bad:#ff8080;
-  --accent:#6080ff;--r:16px
+  --accent:#6080ff;--r:14px;--topH:52px;--compH:70px
 }
-*{box-sizing:border-box}
-html,body{margin:0;height:100%;background:linear-gradient(150deg,var(--bg),var(--bg2) 70%);color:var(--text);font-family:Inter,system-ui,sans-serif;overflow:hidden}
-.app{display:grid;grid-template-rows:52px 1fr 108px;height:100vh}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:linear-gradient(150deg,var(--bg),var(--bg2) 70%);
+  color:var(--text);font-family:Inter,system-ui,sans-serif;overflow:hidden}
 
-.topbar{display:flex;align-items:center;gap:10px;padding:0 14px;border-bottom:1px solid var(--line);background:rgba(5,8,20,.97);backdrop-filter:blur(16px)}
-.orb{width:11px;height:11px;border-radius:50%;background:radial-gradient(circle at 30% 30%,#d8e4ff,#6888ff 40%,#2840b8);box-shadow:0 0 12px rgba(90,120,255,.9);animation:orb-pulse 2.6s ease-in-out infinite;flex-shrink:0}
-@keyframes orb-pulse{0%,100%{box-shadow:0 0 10px rgba(90,120,255,.7)}50%{box-shadow:0 0 22px rgba(100,140,255,1)}}}
-.brand{font-size:17px;font-weight:900;letter-spacing:-.02em;flex-shrink:0}
-.tbr{display:flex;gap:5px;flex-wrap:wrap;align-items:center;margin-left:auto}
-.btn{border:1px solid rgba(110,140,255,.17);background:rgba(25,38,90,.38);color:var(--text);border-radius:11px;padding:6px 10px;font-weight:700;font-size:11px;cursor:pointer;transition:all .12s;white-space:nowrap;flex-shrink:0}
-.btn:hover{border-color:rgba(150,180,255,.35);background:rgba(50,72,148,.42);transform:translateY(-1px)}
-.btn:disabled{opacity:.4;cursor:default;transform:none}
+/* ── App shell ── */
+.app{display:flex;flex-direction:column;height:100dvh;height:100vh}
+.topbar{display:flex;align-items:center;gap:8px;padding:0 10px;height:var(--topH);
+  border-bottom:1px solid var(--line);background:rgba(5,8,20,.97);
+  backdrop-filter:blur(16px);flex-shrink:0;overflow-x:auto;overflow-y:hidden}
+.topbar::-webkit-scrollbar{display:none}
+.orb{width:10px;height:10px;border-radius:50%;flex-shrink:0;
+  background:radial-gradient(circle at 30% 30%,#d8e4ff,#6888ff 40%,#2840b8);
+  box-shadow:0 0 12px rgba(90,120,255,.9);animation:orb-pulse 2.6s ease-in-out infinite}
+@keyframes orb-pulse{0%,100%{box-shadow:0 0 8px rgba(90,120,255,.7)}50%{box-shadow:0 0 18px rgba(100,140,255,1)}}
+.brand{font-size:15px;font-weight:900;letter-spacing:-.02em;flex-shrink:0;white-space:nowrap}
+.tbr{display:flex;gap:5px;align-items:center;margin-left:auto;flex-shrink:0}
+.btn{border:1px solid rgba(110,140,255,.17);background:rgba(25,38,90,.38);color:var(--text);
+  border-radius:10px;padding:5px 9px;font-weight:700;font-size:11px;cursor:pointer;
+  transition:all .12s;white-space:nowrap;flex-shrink:0;touch-action:manipulation}
+.btn:hover,.btn:active{border-color:rgba(150,180,255,.35);background:rgba(50,72,148,.42)}
 .btn.p{background:linear-gradient(150deg,rgba(80,110,240,.48),rgba(45,65,148,.42));border-color:rgba(130,160,255,.28)}
 .btn.d{background:rgba(180,50,50,.22);border-color:rgba(240,90,90,.28);color:var(--bad)}
 .lever{background:rgba(30,160,80,.18);border-color:rgba(60,200,110,.28)}
-.lever:hover{background:rgba(30,180,90,.28)}
 .lever.on{background:rgba(30,200,100,.32);border-color:rgba(70,240,130,.45);color:var(--good)}
-.sep{width:1px;height:22px;background:var(--line);flex-shrink:0}
+.sep{width:1px;height:18px;background:var(--line);flex-shrink:0}
 
-.layout{display:grid;grid-template-columns:188px 1fr 268px;gap:9px;padding:9px;min-height:0;overflow:hidden}
-.panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);display:flex;flex-direction:column;min-height:0;overflow:hidden}
-.ph{padding:11px 13px 8px;border-bottom:1px solid rgba(110,140,255,.09);flex-shrink:0}
-.pt{font-size:10px;font-weight:800;letter-spacing:.09em;text-transform:uppercase;color:var(--bright)}
-.pb{overflow-y:auto;padding:9px;flex:1}
-
-.rb{width:100%;text-align:left;border:1px solid transparent;background:rgba(12,18,48,.5);color:var(--text);border-radius:11px;padding:9px 11px;margin-bottom:6px;cursor:pointer;transition:all .12s}
-.rb:hover{border-color:rgba(130,158,255,.2)}
-.rb.a{background:linear-gradient(150deg,rgba(60,85,190,.42),rgba(35,50,110,.36));border-color:rgba(140,170,255,.3)}
-.rn{font-weight:800;font-size:13px}.rm{font-size:10px;color:var(--muted);margin-top:2px}
-
-.fp{display:grid;grid-template-rows:44px 1fr}
-.fh{display:flex;align-items:center;justify-content:space-between;padding:0 13px;border-bottom:1px solid rgba(110,140,255,.09);flex-shrink:0}
-.ft{font-size:17px;font-weight:900;letter-spacing:-.02em}
-.pills{display:flex;gap:5px}
-.pill{padding:3px 8px;border-radius:999px;border:1px solid rgba(120,148,255,.13);background:rgba(10,16,44,.6);font-size:10px;font-weight:700;color:var(--muted)}
+/* ── Pills bar (mobile status) ── */
+.pillbar{display:flex;gap:5px;padding:6px 10px;border-bottom:1px solid var(--line);
+  background:rgba(5,8,20,.85);overflow-x:auto;flex-shrink:0}
+.pillbar::-webkit-scrollbar{display:none}
+.pill{padding:3px 8px;border-radius:999px;border:1px solid rgba(120,148,255,.13);
+  background:rgba(10,16,44,.6);font-size:10px;font-weight:700;color:var(--muted);
+  white-space:nowrap;flex-shrink:0}
 .pill.ok{color:var(--good);border-color:rgba(90,230,150,.2)}
 .pill.w{color:var(--warn);border-color:rgba(255,200,60,.2)}
 .pill.b{color:var(--bad);border-color:rgba(255,110,110,.2)}
 
-.feed{overflow-y:auto;padding:11px;display:flex;flex-direction:column;gap:9px}
-.msg{display:grid;grid-template-columns:40px 1fr;gap:8px;align-items:start}
-.av{width:40px;height:40px;border-radius:11px;display:grid;place-items:center;font-weight:900;font-size:14px;border:1px solid rgba(160,188,255,.14);flex-shrink:0}
+/* ── Room tabs (mobile-first, always visible) ── */
+.roomtabs{display:flex;gap:5px;padding:6px 10px;border-bottom:1px solid var(--line);
+  background:rgba(5,8,20,.8);overflow-x:auto;flex-shrink:0}
+.roomtabs::-webkit-scrollbar{display:none}
+.rtab{border:1px solid rgba(110,140,255,.15);background:rgba(12,18,52,.5);color:var(--muted);
+  border-radius:20px;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer;
+  white-space:nowrap;flex-shrink:0;touch-action:manipulation;transition:all .12s}
+.rtab.a{background:linear-gradient(150deg,rgba(60,85,190,.5),rgba(35,50,110,.4));
+  border-color:rgba(140,170,255,.35);color:var(--text)}
+
+/* ── Feed ── */
+.feed{flex:1;overflow-y:auto;padding:10px;display:flex;flex-direction:column;gap:8px;
+  min-height:0;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
+.msg{display:grid;grid-template-columns:36px 1fr;gap:7px;align-items:start}
+.av{width:36px;height:36px;border-radius:10px;display:grid;place-items:center;
+  font-weight:900;font-size:12px;border:1px solid rgba(160,188,255,.14);flex-shrink:0}
 .av-j{background:linear-gradient(150deg,rgba(190,148,45,.7),rgba(130,90,20,.6))}
 .av-a{background:linear-gradient(150deg,rgba(60,95,215,.7),rgba(35,58,140,.6))}
 .av-g{background:linear-gradient(150deg,rgba(50,170,90,.65),rgba(28,98,50,.55))}
 .av-s{background:linear-gradient(150deg,rgba(110,70,190,.65),rgba(65,38,138,.55))}
-.bubble{padding:9px 12px;border-radius:14px;border:1px solid rgba(110,140,255,.1);background:linear-gradient(150deg,rgba(10,17,48,.93),rgba(7,12,36,.89))}
+.bubble{padding:8px 11px;border-radius:13px;border:1px solid rgba(110,140,255,.1);
+  background:linear-gradient(150deg,rgba(10,17,48,.93),rgba(7,12,36,.89))}
 .bubble-j{border-color:rgba(190,148,45,.17);background:linear-gradient(150deg,rgba(28,20,6,.93),rgba(12,9,3,.89))}
-.mt{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
-.who{font-weight:900;font-size:13px}
-.ts{font-size:10px;color:var(--muted)}
-.bdg{font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--bright);padding:2px 6px;border-radius:999px;border:1px solid rgba(120,152,255,.16);background:rgba(16,24,64,.55)}
-.body{white-space:pre-wrap;line-height:1.55;font-size:13px;margin-top:6px;color:#d8e0ff;word-break:break-word}
+.mt{display:flex;align-items:center;gap:5px;flex-wrap:wrap}
+.who{font-weight:900;font-size:12px}
+.ts{font-size:9px;color:var(--muted)}
+.bdg{font-size:9px;letter-spacing:.07em;text-transform:uppercase;color:var(--bright);
+  padding:2px 5px;border-radius:999px;border:1px solid rgba(120,152,255,.16);background:rgba(16,24,64,.55)}
+.body{white-space:pre-wrap;line-height:1.5;font-size:13px;margin-top:5px;color:#d8e0ff;word-break:break-word}
 .typing{display:flex;gap:4px;align-items:center;padding:4px 0}
 .dot{width:5px;height:5px;border-radius:50%;background:var(--muted);animation:blink 1.4s ease-in-out infinite}
 .dot:nth-child(2){animation-delay:.18s}.dot:nth-child(3){animation-delay:.36s}
 @keyframes blink{0%,100%{opacity:.25}50%{opacity:1}}
 
-.composer{padding:9px 12px;border-top:1px solid var(--line);background:rgba(5,8,20,.97);flex-shrink:0}
-.cbox{display:grid;grid-template-columns:1fr auto;gap:9px;align-items:end}
-textarea{width:100%;min-height:54px;max-height:110px;resize:vertical;border-radius:13px;border:1px solid rgba(120,150,255,.16);background:rgba(7,12,38,.97);color:var(--text);padding:9px 12px;font-size:13px;outline:none;font-family:inherit;transition:border-color .12s}
+/* ── Composer ── */
+.composer{padding:8px 10px;border-top:1px solid var(--line);background:rgba(5,8,20,.97);
+  flex-shrink:0;padding-bottom:max(8px,env(safe-area-inset-bottom))}
+.cbox{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:end}
+textarea{width:100%;min-height:44px;max-height:90px;resize:none;border-radius:12px;
+  border:1px solid rgba(120,150,255,.16);background:rgba(7,12,38,.97);color:var(--text);
+  padding:8px 11px;font-size:14px;outline:none;font-family:inherit;transition:border-color .12s;
+  -webkit-appearance:none}
 textarea:focus{border-color:rgba(150,185,255,.3)}
 
-.sc{border:1px solid rgba(110,140,255,.1);border-radius:13px;background:rgba(9,14,42,.6);padding:9px;margin-bottom:7px}
-.sk{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.1em}
-.sv{font-size:15px;font-weight:900;margin-top:2px}
-.sg{display:grid;grid-template-columns:1fr 1fr;gap:6px}
-.ri{padding:8px 10px;border-radius:11px;background:rgba(10,17,50,.65);border:1px solid rgba(110,140,255,.08);margin-bottom:6px}
-.rt{font-weight:800;font-size:12px}.re{font-size:10px;color:var(--muted);margin-top:2px}
-.bridge-req{border-left:3px solid var(--warn);padding-left:7px}
-.bridge-req.fulfilled{border-left-color:var(--good)}
+/* ── Rail (desktop only) ── */
+.rail-panel{display:none}
+.ri{padding:7px 9px;border-radius:10px;background:rgba(10,17,50,.65);
+  border:1px solid rgba(110,140,255,.08);margin-bottom:5px}
+.rt{font-weight:800;font-size:11px}.re{font-size:10px;color:var(--muted);margin-top:2px}
+.sc{border:1px solid rgba(110,140,255,.1);border-radius:12px;background:rgba(9,14,42,.6);padding:8px;margin-bottom:6px}
+.pt{font-size:10px;font-weight:800;letter-spacing:.09em;text-transform:uppercase;color:var(--bright)}
+.sv{font-size:14px;font-weight:900;margin-top:2px}
 
-.toast{position:fixed;right:11px;bottom:11px;z-index:99;padding:8px 12px;border-radius:11px;background:rgba(7,12,38,.99);border:1px solid rgba(130,160,255,.22);font-size:11px;max-width:260px;pointer-events:none;opacity:0;transition:opacity .2s}
+/* ── Toast ── */
+.toast{position:fixed;right:10px;bottom:80px;z-index:99;padding:8px 12px;border-radius:10px;
+  background:rgba(7,12,38,.99);border:1px solid rgba(130,160,255,.22);font-size:11px;
+  max-width:240px;pointer-events:none;opacity:0;transition:opacity .2s}
 .toast.show{opacity:1}
 
-@media(max-width:820px){.layout{grid-template-columns:1fr}.sb,.rail{display:none}}
+/* ── Desktop layout ── */
+@media(min-width:768px){
+  .app{flex-direction:column}
+  .roomtabs{display:none}
+  .body-area{display:grid;grid-template-columns:168px 1fr 240px;gap:8px;padding:8px;flex:1;min-height:0}
+  .sidebar{display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+  .sb-head{padding:9px 11px;border-bottom:1px solid rgba(110,140,255,.09)}
+  .sb-body{padding:8px;flex:1;overflow-y:auto}
+  .rb{width:100%;text-align:left;border:1px solid transparent;background:rgba(12,18,48,.5);
+    color:var(--text);border-radius:10px;padding:8px 10px;margin-bottom:5px;cursor:pointer;transition:all .12s}
+  .rb:hover{border-color:rgba(130,158,255,.2)}
+  .rb.a{background:linear-gradient(150deg,rgba(60,85,190,.42),rgba(35,50,110,.36));border-color:rgba(140,170,255,.3)}
+  .rn{font-weight:800;font-size:12px}.rm{font-size:10px;color:var(--muted);margin-top:1px}
+  .main-panel{display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--line);border-radius:var(--r);overflow:hidden;min-height:0}
+  .rail-panel{display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+  .rail-head{padding:9px 11px;border-bottom:1px solid rgba(110,140,255,.09)}
+  .rail-body{padding:8px;flex:1;overflow-y:auto}
+  .mobile-feed{flex:1;min-height:0;display:flex;flex-direction:column}
+  .pillbar{display:none}
+}
+@media(max-width:767px){
+  .body-area{display:flex;flex-direction:column;flex:1;min-height:0}
+  .sidebar{display:none}
+  .main-panel{display:flex;flex-direction:column;flex:1;min-height:0}
+}
 </style>
 </head>
 <body>
 <div class="app">
+  <!-- Topbar -->
   <div class="topbar">
     <div class="orb"></div>
     <div class="brand">FARL Orion Apex</div>
@@ -563,48 +609,55 @@ textarea:focus{border-color:rgba(150,185,255,.3)}
       <button class="btn" id="bStrategy">Strategy</button>
       <button class="btn p" id="bMutate">⚡ Mutate</button>
       <div class="sep"></div>
-      <button class="btn" id="bAuto" title="Toggle autonomy mode">Auto: OFF</button>
-      <button class="btn lever" id="bFree" title="Jack's lever — full free agency">🔓 Free Agency</button>
+      <button class="btn" id="bAuto">Auto: OFF</button>
+      <button class="btn lever" id="bFree">🔓 Agency</button>
       <div class="sep"></div>
-      <button class="btn d" id="bRollback" title="Force rollback to anchor SHA">↩ Rollback</button>
-      <button class="btn" id="bClearQ" title="Clear quarantine">Clear Q</button>
-      <button class="btn" id="bResetF" title="Reset fragility to 0">Reset Frag</button>
+      <button class="btn d" id="bRollback">↩ Roll</button>
+      <button class="btn" id="bClearQ">Clear Q</button>
+      <button class="btn" id="bResetF">Reset F</button>
       <button class="btn" id="bPause">⏸</button>
     </div>
   </div>
 
-  <div class="layout">
-    <aside class="panel sb">
-      <div class="ph"><div class="pt">Rooms</div></div>
-      <div class="pb" id="roomList"></div>
-    </aside>
-
-    <main class="panel fp">
-      <div class="fh">
-        <div class="ft" id="roomTitle">Council</div>
-        <div class="pills">
-          <div class="pill" id="pMut">IDLE</div>
-          <div class="pill" id="pGen">Genesis</div>
-          <div class="pill" id="pFree">Autonomous</div>
-          <div class="pill" id="pFrag">Frag: 0.00</div>
-          <div class="pill" id="pMeta">expand</div>
-          <div class="pill" id="pBridge">Bridge: 0</div>
-        </div>
-      </div>
-      <div class="feed" id="feed"></div>
-    </main>
-
-    <aside class="panel rail">
-      <div class="ph"><div class="pt">Evolution Console</div></div>
-      <div class="pb" id="rail"></div>
-    </aside>
+  <!-- Status pills — always visible -->
+  <div class="pillbar">
+    <div class="pill" id="pMut">IDLE</div>
+    <div class="pill" id="pGen">Genesis</div>
+    <div class="pill" id="pFree">Autonomous</div>
+    <div class="pill" id="pFrag">Frag: 0.00</div>
+    <div class="pill" id="pMeta">expand</div>
+    <div class="pill" id="pBridge">Bridge: 0</div>
   </div>
 
-  <div class="composer">
-    <div class="cbox">
-      <textarea id="msg" placeholder="Speak to the council… (Enter sends, Shift+Enter newline)"></textarea>
-      <button class="btn p" id="bSend" style="padding:10px 14px;height:54px">Send</button>
+  <!-- Room tabs — mobile only -->
+  <div class="roomtabs" id="roomtabs"></div>
+
+  <!-- Body -->
+  <div class="body-area">
+    <!-- Desktop sidebar -->
+    <aside class="sidebar">
+      <div class="sb-head"><div class="pt">Rooms</div></div>
+      <div class="sb-body" id="roomList"></div>
+    </aside>
+
+    <!-- Main feed panel -->
+    <div class="main-panel">
+      <div style="padding:8px 12px;border-bottom:1px solid rgba(110,140,255,.09);font-size:14px;font-weight:900" id="roomTitle">Council</div>
+      <div class="feed" id="feed"></div>
+      <!-- Composer inside main panel -->
+      <div class="composer">
+        <div class="cbox">
+          <textarea id="msg" placeholder="Speak to the council… (Enter sends, Shift+Enter newline)" rows="2"></textarea>
+          <button class="btn p" id="bSend" style="padding:9px 13px;height:46px">Send</button>
+        </div>
+      </div>
     </div>
+
+    <!-- Desktop rail -->
+    <aside class="rail-panel">
+      <div class="rail-head"><div class="pt">Evolution Console</div></div>
+      <div class="rail-body" id="rail"></div>
+    </aside>
   </div>
 </div>
 <div class="toast" id="toast"></div>
@@ -623,7 +676,6 @@ const esc=t=>(t||"").replace(/\r\n/g,"\n").trim();
 const ini=n=>(n||"?").split(/[\s_\-]+/).slice(0,2).map(x=>x[0]||"").join("").toUpperCase()||"?";
 const ft=v=>{try{return new Date(v).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",second:"2-digit"})}catch{return v||""}};
 const fd=v=>{if(!v)return"never";const d=(Date.now()-new Date(v).getTime())/1000;if(d<60)return`${Math.round(d)}s ago`;if(d<3600)return`${Math.round(d/60)}m ago`;return`${Math.round(d/3600)}h ago`};
-const pct=v=>Math.round((v||0)*100)+"%";
 
 let _tt;
 function toast(msg,type="i"){
@@ -652,16 +704,15 @@ function getMsgs(pl,room){
         const thr=(c.threads||[]).map(t=>`${t.agent}: ${t.summary}`).join("\n");
         return{who:"Signal",cls:"a",badge:"Tactic",body:`Leader: ${c.leader||"?"} | Meta: ${c.meta_mode||"?"}\n${thr}`,ts:m.ts};
       }
-      if(k==="strategy")return{who:"Vector",cls:"a",badge:"Strategy",body:`Winner: ${(c.winner||{}).model||"?"} (${(c.winner||{}).score||"?"}) | Free: ${c.free_agency}`,ts:m.ts};
-      if(k==="reflex")return{who:"Reflex",cls:"s",badge:"Reflex",body:`Ops: ${c.opportunities||0} | Grok: ${c.grok_live} | Meta: ${c.meta_mode||"?"}`,ts:m.ts};
-      if(k==="constitution")return{who:"Guardian",cls:"g",badge:"Constitution",body:`Mode: ${(c.doctrine||{}).autonomy_mode} | Meta: ${(c.doctrine||{}).meta_mode||"?"} | Bridge: ${(c.doctrine||{}).bridge_pending||0}`,ts:m.ts};
+      if(k==="strategy")return{who:"Vector",cls:"a",badge:"Strategy",body:`Winner: ${(c.winner||{}).model||"?"} | Free: ${c.free_agency}`,ts:m.ts};
+      if(k==="reflex")return{who:"Reflex",cls:"s",badge:"Reflex",body:`Ops: ${c.opportunities||0} | Meta: ${c.meta_mode||"?"}`,ts:m.ts};
+      if(k==="constitution")return{who:"Guardian",cls:"g",badge:"Audit",body:`Mode: ${(c.doctrine||{}).autonomy_mode} | Meta: ${(c.doctrine||{}).meta_mode||"?"} | Bridge: ${(c.doctrine||{}).bridge_pending||0}`,ts:m.ts};
       if(k==="governance")return{who:"Governance",cls:"g",badge:c.event||"event",body:fmtGov(c),ts:m.ts};
       if(k==="meta_mode_changed")return{who:"MetaStrategy",cls:"s",badge:"Mode",body:`→ ${c.mode||"?"}: ${c.reason||""}`,ts:m.ts};
       if(k==="consolidation")return{who:"Consolidation",cls:"g",badge:"Consolidation",body:`Actions: ${(c.actions||[]).join(", ")}`,ts:m.ts};
       return null;
     }).filter(Boolean);
   }
-
   if(room==="agent_chat"){
     return (ch.agent_chat||[]).map(i=>{const c=i.content||{};return{who:c.agent||"Agent",cls:"a",badge:c.kind||"Reply",body:c.message||"",ts:i.ts}}).filter(x=>x.body);
   }
@@ -682,30 +733,42 @@ function fmtGov(c){
   if(e==="evolution_success")return`✓ Evolution — SHA: ${(c.sha||"?").slice(0,8)} | Frag: ${c.fragility||"?"} txn: ${(c.txn_id||"?").slice(0,12)}`;
   if(e==="GENESIS")return`★ GENESIS — Node is APEX. SHA: ${(c.sha||"?").slice(0,8)}`;
   if(e==="rollback")return`↩ Rollback to ${(c.to||"?").slice(0,8)} | OK: ${c.ok} | Streak: ${c.streak||0}`;
-  if(e==="rollback_verified")return`↩ Rollback verified: ${c.ok} | SHA: ${(c.sha||"?").slice(0,8)}`;
-  if(e==="quarantine_entered")return`⚠ QUARANTINE — ${c.streak||0} failures`;
-  if(e==="quarantine_cleared")return`✓ Quarantine cleared by ${c.by||"?"}`;
-  if(e==="mutation_started")return`⚡ Mutation: ${(c.objective||"?").slice(0,60)} txn: ${(c.txn_id||"").slice(0,12)}`;
+  if(e==="mutation_started")return`⚡ Mutation: ${(c.objective||"?").slice(0,60)}`;
   if(e==="free_agency_enabled")return`🔓 FREE AGENCY ENABLED by ${c.by||"?"}`;
   if(e==="free_agency_disabled")return`🔒 Free agency disabled`;
-  if(e==="manual_rollback")return`↩ Manual rollback to ${(c.sha||"?").slice(0,8)} | OK: ${c.ok}`;
-  if(e==="bridge_fulfilled")return`🔗 Bridge fulfilled: ${c.capability||"?"} id: ${(c.request_id||"").slice(0,12)}`;
-  if(e==="consolidation")return`🧬 Consolidation #${c.count||"?"}: ${(c.actions||[]).join(", ")}`;
-  if(e==="meta_mode_changed")return`🎯 Meta → ${c.mode||"?"}: ${c.reason||""}`;
-  return JSON.stringify(c,null,2);
+  if(e==="quarantine_entered")return`⚠ QUARANTINE — ${c.streak||0} failures`;
+  if(e==="quarantine_cleared")return`✓ Quarantine cleared`;
+  if(e==="manual_rollback")return`↩ Manual rollback to ${(c.sha||"?").slice(0,8)}`;
+  return JSON.stringify(c,null,2).slice(0,200);
 }
 
 function avCls(cls){return cls==="j"?"av-j":cls==="g"?"av-g":cls==="s"?"av-s":"av-a"}
 function bubCls(cls){return cls==="j"?"bubble-j":""}
 
+function setRoom(k){
+  S.room=k;
+  $("roomTitle").textContent=ROOMS[k]?.l||k;
+  renderFeed();renderRooms();
+}
+
 function renderRooms(){
+  // Desktop sidebar
   const el=$("roomList");el.innerHTML="";
   Object.entries(ROOMS).forEach(([k,d])=>{
     const b=document.createElement("button");
     b.className="rb"+(S.room===k?" a":"");
     b.innerHTML=`<div class="rn">${d.l}</div><div class="rm">${d.d}</div>`;
-    b.onclick=()=>{S.room=k;renderFeed();renderRooms();$("roomTitle").textContent=d.l};
+    b.onclick=()=>setRoom(k);
     el.appendChild(b);
+  });
+  // Mobile tabs
+  const tabs=$("roomtabs");tabs.innerHTML="";
+  Object.entries(ROOMS).forEach(([k,d])=>{
+    const b=document.createElement("button");
+    b.className="rtab"+(S.room===k?" a":"");
+    b.textContent=d.l;
+    b.onclick=()=>setRoom(k);
+    tabs.appendChild(b);
   });
 }
 
@@ -713,12 +776,12 @@ function renderFeed(){
   const msgs=getMsgs(S.pl,S.room).sort((a,b)=>new Date(a.ts)-new Date(b.ts));
   const el=$("feed");el.innerHTML="";
   if(!msgs.length){
-    el.innerHTML=`<div class="ri"><div class="rt">Room quiet</div><div class="re">No events yet.</div></div>`;
+    el.innerHTML=`<div class="ri"><div class="rt">Room quiet</div><div class="re">No events yet. Loops fire every 30s (reflex), 2m (tactic), 10m (mutation).</div></div>`;
     return;
   }
   msgs.forEach(m=>{
     const d=document.createElement("div");
-    d.className=`msg`;
+    d.className="msg";
     d.innerHTML=`<div class="av ${avCls(m.cls)}">${ini(m.who)}</div>
       <div class="bubble ${bubCls(m.cls)}">
         <div class="mt"><div class="who">${m.who}</div><div class="ts">${ft(m.ts)}</div><div class="bdg">${m.badge}</div></div>
@@ -741,19 +804,18 @@ $("feed").addEventListener("scroll",()=>{
 
 function renderPills(){
   const s=(S.pl||{}).summary||{};
-  const q=(S.pl||{}).queues||{};
   const mut=s.mutation_status||"?";
-  const mp=$("pMut");mp.textContent=`Mut: ${mut}`;
+  const mp=$("pMut");mp.textContent=`${mut}`;
   mp.className="pill"+(mut==="IDLE"?" ok":mut==="QUARANTINE"?" b":" w");
-  const gp=$("pGen");gp.textContent=s.genesis_triggered?"★ APEX":"Genesis: —";
+  const gp=$("pGen");gp.textContent=s.genesis_triggered?"★ APEX":"Genesis";
   gp.className="pill"+(s.genesis_triggered?" ok":"");
   S.freeOn=!!s.free_agency_enabled;
   const fp=$("pFree");fp.textContent=S.freeOn?"🔓 FREE":s.autonomy_mode||"autonomous";
   fp.className="pill"+(S.freeOn?" ok":"");
   $("pFrag").textContent=`Frag: ${Number(s.fragility||0).toFixed(2)}`;
-  const meta=s.meta_mode||"?";
-  const mp2=$("pMeta");mp2.textContent=`Meta: ${meta}`;
-  mp2.className="pill"+(meta==="expand"?" ok":meta==="heal"?" w":meta==="consolidate"?" w":"");
+  const meta=s.meta_mode||"expand";
+  const mp2=$("pMeta");mp2.textContent=meta;
+  mp2.className="pill"+(meta==="expand"?" ok":meta==="targeted_repair"?" w":"");
   const bp=$("pBridge");bp.textContent=`Bridge: ${s.bridge_pending||0}`;
   bp.className="pill"+(s.bridge_pending>0?" w":"");
   // Buttons
@@ -761,141 +823,31 @@ function renderPills(){
   $("bAuto").textContent=`Auto: ${S.autoOn?"ON":"OFF"}`;
   $("bAuto").className="btn"+(S.autoOn?" p":"");
   $("bFree").className="btn lever"+(S.freeOn?" on":"");
-  $("bFree").textContent=S.freeOn?"🔓 Free Agency ON":"🔓 Free Agency";
+  $("bFree").textContent=S.freeOn?"🔓 Agency ON":"🔓 Agency";
 }
 
 function renderRail(){
   const s=(S.pl||{}).summary||{};
   const q=(S.pl||{}).queues||{};
-  const agents=(S.pl||{}).free_agents||[];
-  const dirs=q.agent_directives||[];
-  const mut=s.mutation_status||"?";
+  const rail=$("rail");if(!rail)return;
+  const diag=s.deployer_ready===false?(s.deployer_diagnostics||{}):{};
+  const diagHtml=s.deployer_ready===false?`<div class="ri" style="border-left:3px solid var(--bad)">
+    <div class="rt" style="color:var(--bad)">Deployer NOT READY</div>
+    <div class="re" style="color:var(--bad)">GH:${diag.github_token_set?"✓":"✗MISSING"} REPO:${diag.repo_name_set?"✓":"✗MISSING"} ANTHROPIC:${diag.anthropic_key_set?"✓":"✗MISSING"}</div></div>`:"";
 
-  // Self model
-  const sm=q.self_model||{};
-  const modules=Object.entries(sm.modules||{});
-  const caps=Object.keys(sm.capabilities||{}).filter(k=>(sm.capabilities[k]||{}).status==="active");
-  const missing=sm.missing_capabilities||[];
-
-  // Goal hierarchy
-  const gh=q.goal_hierarchy||{};
-  const election=gh.last_election||{};
-  const tactical=(gh.tactical||[]).filter(t=>t.status==="pending");
-
-  // Meta
-  const meta=q.meta||{};
-
-  // Learning
-  const learn=q.learning||{};
-  const fams=Object.entries(learn.mutation_families||{}).filter(([,v])=>v.attempts>0);
-  const deltas=(learn.deltas||[]).slice(-4).reverse();
-
-  // Bridge
-  const bridge=q.bridge||{};
-  const pending=(bridge.requests||[]).filter(r=>r.status==="awaiting_operator");
-  const fulfilled=(bridge.requests||[]).filter(r=>r.status==="verified"||r.status==="fulfilled");
-
-  // Consolidation
-  const consol=q.consolidation||{};
-
-  // Active transaction
-  const txn=s.active_transaction||null;
-
-  // Candidates
-  const search=q.search||{};
-  const candidates=search.current_round||[];
-
-  $("rail").innerHTML=`
+  rail.innerHTML=`
     <div class="sc">
-      <div class="pt" style="margin-bottom:8px">Core</div>
-      <div class="sg">
-        <div class="sc"><div class="sk">Mutation</div><div class="sv" style="color:${mut==="IDLE"?"var(--good)":mut==="QUARANTINE"?"var(--bad)":"var(--warn)"}">${mut}</div></div>
-        <div class="sc"><div class="sk">Genesis</div><div class="sv" style="color:${s.genesis_triggered?"var(--good)":"var(--warn)"}">${s.genesis_triggered?"APEX":"—"}</div></div>
-        <div class="sc"><div class="sk">Fragility</div><div class="sv">${Number(s.fragility||0).toFixed(2)}</div></div>
-        <div class="sc"><div class="sk">Failures</div><div class="sv" style="color:${(s.failure_streak||0)>=3?"var(--bad)":"var(--text)"}">${s.failure_streak||0}</div></div>
-        <div class="sc"><div class="sk">Meta Mode</div><div class="sv" style="font-size:12px;color:${s.meta_mode==="heal"?"var(--warn)":s.meta_mode==="consolidate"?"var(--warn)":"var(--good)"}">${s.meta_mode||"?"}</div></div>
-        <div class="sc"><div class="sk">Spend</div><div class="sv" style="font-size:12px">$${Number((s.spend_state||{}).total_usd||0).toFixed(3)}</div></div>
-      </div>
-      <div class="re" style="margin-top:4px">Meta: ${s.meta_reason||"—"}</div>
-      <div class="re">Cadence: ${s.meta_cadence||1800}s | Consolidations: ${s.consolidation_count||0}</div>
+      <div class="pt">System</div>
+      <div class="ri"><div class="rt">Mutation</div><div class="re">${s.mutation_status||"?"} | ${fd(s.last_mutation_ts)}</div></div>
+      ${s.last_mutation_objective?`<div class="ri" style="${s.last_mutation_objective.startsWith('BLOCKED')?'border-left:3px solid var(--bad)':''}"><div class="rt" style="${s.last_mutation_objective.startsWith('BLOCKED')?'color:var(--bad)':''}">Last Objective</div><div class="re">${s.last_mutation_objective.slice(0,80)}</div></div>`:""}
+      <div class="ri"><div class="rt">Deployer</div><div class="re">${s.deployer_ready?"✓ Ready":"✗ NOT READY"} | Ledger: ${s.ledger_configured?"✓":"✗"}</div></div>
+      ${diagHtml}
     </div>
-
-    ${txn?`<div class="sc">
-      <div class="pt" style="margin-bottom:7px">Active Transaction</div>
-      <div class="re"><b>${(txn.transaction_id||"").slice(0,16)}</b> — ${txn.status||"?"}</div>
-      <div class="re">${(txn.objective||"").slice(0,55)}</div>
-      <div class="re">Modules: ${(txn.touched_modules||[]).join(", ")||"—"}</div>
-    </div>`:""}
-
-    ${election.winner?`<div class="sc">
-      <div class="pt" style="margin-bottom:7px">Last Elected Objective</div>
-      <div class="re"><b>Score: ${election.score||"?"}</b></div>
-      <div class="re">${(election.winner||"").slice(0,65)}</div>
-      ${(election.ranking||[]).slice(0,3).map(r=>`<div class="re" style="padding-left:4px;border-left:2px solid rgba(110,140,255,.2)">${Number(r.score||0).toFixed(3)} — ${(r.objective||"").slice(0,45)}</div>`).join("")}
-    </div>`:""}
-
-    ${pending.length?`<div class="sc" style="border-color:rgba(255,200,60,.25)">
-      <div class="pt" style="margin-bottom:7px;color:var(--warn)">🔗 Bridge Requests (${pending.length})</div>
-      ${pending.map(r=>`<div class="ri bridge-req">
-        <div class="rt">${r.capability||"?"}</div>
-        <div class="re">${r.reason||""}</div>
-        <div class="re">→ ${r.human_action||""}</div>
-        <div class="re">Blocks: ${(r.blocked_objective||"").slice(0,40)}</div>
-        <div class="re" style="color:var(--muted);font-size:9px">${r.request_id||""}</div>
-      </div>`).join("")}
-    </div>`:""}
-
-    ${modules.length?`<div class="sc">
-      <div class="pt" style="margin-bottom:7px">Self-Model</div>
-      ${modules.map(([name,mod])=>`<div class="ri" style="border-left:2px solid ${mod.protected?"var(--bad)":"rgba(110,140,255,.2)"}">
-        <div class="rt">${name} <span style="font-size:9px;color:var(--muted)">${mod.role||""}</span>${mod.protected?` <span style="color:var(--bad);font-size:9px">🔒</span>`:""}</div>
-        <div class="re">Frag: ${Number(mod.fragility||0).toFixed(2)} | Att: ${mod.attempts||0} | OK: ${mod.successes||0} | ${mod.last_outcome||"—"}</div>
-      </div>`).join("")}
-      ${missing.length?`<div class="re" style="color:var(--warn);margin-top:4px">Missing caps: ${missing.map(c=>c.capability).join(", ")}</div>`:""}
-    </div>`:""}
-
-    <div class="sc">
-      <div class="pt" style="margin-bottom:7px">Goals</div>
-      ${tactical.length?`<div class="re" style="color:var(--bright);margin-bottom:4px">Tactical (${tactical.length} pending):</div>
-      ${tactical.slice(0,3).map(t=>`<div class="ri"><div class="rt" style="font-size:11px">${(t.label||"").slice(0,50)}</div><div class="re">${t.source||""} p=${t.priority||""}</div></div>`).join("")}`:""}
-      ${(gh.strategy||[]).map(g=>`<div class="ri"><div class="re" style="color:var(--muted)">${g.id||""} — ${g.label||""}</div></div>`).join("")}
-    </div>
-
-    ${fams.length?`<div class="sc">
-      <div class="pt" style="margin-bottom:7px">Learning</div>
-      ${fams.sort((a,b)=>b[1].attempts-a[1].attempts).slice(0,5).map(([fam,v])=>{
-        const sr=v.attempts>0?Math.round(v.successes/v.attempts*100):0;
-        return`<div class="ri"><div class="rt" style="font-size:11px">${fam}</div><div class="re">${v.attempts} att | ${sr}% ok | last: ${v.last_outcome||"—"}</div></div>`;
-      }).join("")}
-      ${deltas.length?`<div class="re" style="margin-top:4px">Recent: ${deltas.map(d=>`${d.family}→${d.success?"✓":"✗"}`).join(" | ")}</div>`:""}
-    </div>`:""}
-
-    ${consol.count>0?`<div class="sc">
-      <div class="pt" style="margin-bottom:7px">Consolidation</div>
-      <div class="re">Runs: ${consol.count||0} | Last: ${fd(consol.last_consolidation)}</div>
-      <div class="re">Protected: ${(consol.protected_surfaces||[]).join(", ")||"none"}</div>
-      ${(consol.archived_families||[]).length?`<div class="re">Retired: ${(consol.archived_families||[]).map(f=>f.family).join(", ")}</div>`:""}
-    </div>`:""}
-
-    <div class="sc">
-      <div class="pt" style="margin-bottom:7px">Last Mutation</div>
-      <div class="re">${fd(s.last_mutation_ts)||"never"}</div>
-      ${s.last_mutation_objective?`<div class="re" style="margin-top:4px;color:${s.last_mutation_objective.startsWith('BLOCKED')?'#ff6b6b':'inherit'}">${s.last_mutation_objective.slice(0,80)}</div>`:""}
-      <div class="re" style="margin-top:4px">Deployer: ${s.deployer_ready?"✓ READY":"✗ NOT READY"} | Ledger: ${s.ledger_configured?"✓":"✗"} | Mut: ${s.mutation_enabled?"✓":"✗"}</div>
-      ${!s.deployer_ready&&s.deployer_diagnostics?`<div class="re" style="margin-top:4px;color:#ff6b6b;font-size:10px">GH_TOKEN:${s.deployer_diagnostics.github_token_set?"✓":"✗MISSING"} REPO:${s.deployer_diagnostics.repo_name_set?"✓":"✗MISSING"} ANTHROPIC:${s.deployer_diagnostics.anthropic_key_set?"✓":"✗MISSING"} XAI:${s.deployer_diagnostics.xai_key_set?"✓":"✗MISSING"}</div>`:""}
-    </div>
-
-    ${dirs.length?`<div class="sc"><div class="pt" style="margin-bottom:7px">Agent Directives (${dirs.length})</div>${dirs.slice(0,4).map(d=>`<div class="ri"><div class="rt">${d.agent||"?"}</div><div class="re">${(d.directive||"").slice(0,50)}</div></div>`).join("")}</div>`:""}
-
-    <div class="sc">
-      <div class="pt" style="margin-bottom:7px">Open Threads (${s.open_threads||0})</div>
-      ${(q.redesign_threads||[]).slice(0,4).map(t=>`<div class="ri"><div class="rt">${(t.objective||"").slice(0,45)}</div><div class="re">${t.severity||""}</div></div>`).join("")||'<div class="ri"><div class="rt">None</div></div>'}
-    </div>
-
-    ${caps.length?`<div class="sc">
-      <div class="pt" style="margin-bottom:7px">Capabilities (${caps.length})</div>
-      <div class="re" style="word-break:break-word">${caps.join(" · ")}</div>
-    </div>`:""}`;
+    ${(q.agent_directives||[]).length?`<div class="sc"><div class="pt">Agent Queue (${q.agent_directives.length})</div>
+      ${q.agent_directives.slice(0,4).map(d=>`<div class="ri"><div class="rt">${d.agent||"?"}</div><div class="re">${(d.directive||"").slice(0,55)}</div></div>`).join("")}</div>`:""}
+    ${(q.redesign_threads||[]).length?`<div class="sc"><div class="pt">Threads (${q.redesign_threads.length})</div>
+      ${q.redesign_threads.slice(0,3).map(t=>`<div class="ri"><div class="rt">${(t.objective||"").slice(0,40)}</div><div class="re">${t.status||"?"}</div></div>`).join("")}</div>`:""}
+  `;
 }
 
 function renderAll(){
@@ -936,13 +888,13 @@ $("bTactic").onclick=async()=>{try{await api("RUN_TACTIC_CYCLE");toast("Tactic r
 $("bStrategy").onclick=async()=>{try{await api("RUN_STRATEGY_CYCLE");toast("Strategy ran","ok");await refresh();}catch(e){toast(e.message,"e")}};
 $("bMutate").onclick=async()=>{try{await api("RUN_MUTATION_CYCLE",{authorized_by:"Jack"});toast("⚡ Mutation started","ok");await refresh();}catch(e){toast(e.message,"e")}};
 $("bAuto").onclick=async()=>{
-  const newMode=S.autoOn?"supervised":"autonomous";  // toggle: if currently autonomous→supervised, if supervised→autonomous
-  try{await api("SET_AUTONOMY",{mode:newMode,enabled:!S.autoOn});toast(`Autonomy ${S.autoOn?"OFF":"ON"}`,"ok");await refresh();}
+  const newMode=S.autoOn?"supervised":"autonomous";
+  try{await api("SET_AUTONOMY",{mode:newMode});toast(`Autonomy ${S.autoOn?"OFF":"ON"}`,"ok");await refresh();}
   catch(e){toast(e.message,"e")}
 };
 $("bFree").onclick=async()=>{
   if(!S.freeOn){
-    if(!confirm("Enable free agency?\n\nAgents will autonomously generate and execute their own mutation directives without your prompting.\n\nYou can disable from here at any time."))return;
+    if(!confirm("Enable free agency?\n\nAgents will autonomously generate and execute their own mutation directives.\n\nYou can disable at any time."))return;
     try{await api("ENABLE_FREE_AGENCY",{authorized_by:"Jack"});toast("🔓 Free agency ENABLED","ok");await refresh();}
     catch(e){toast(e.message,"e")}
   }else{
@@ -965,78 +917,9 @@ $("bResetF").onclick=async()=>{
 };
 
 // ── Boot ─────────────────────────────────────────────────────────────────────
-refresh();setInterval(refresh,2500);
+renderRooms();
+refresh();
+setInterval(refresh,2500);
 </script>
 </body>
 </html>"""
-
-def render_evolution_console(engine: AutonomousInstitutionEngine) -> str:
-    def render_nested_goals(goals: List[Dict[str, Any]]) -> str:
-        html = ''
-        for goal in goals:
-            name = goal.get('name', 'Unnamed Goal')
-            progress = goal.get('progress', 0)
-            priority = goal.get('priority', 'N/A')
-            html += f'<li><strong>{name}</strong> (Priority: {priority}, Progress: {progress}%)<ul>'
-            if 'subgoals' in goal:
-                html += render_nested_goals(goal['subgoals'])
-            html += '</ul></li>'
-        return html
-
-    self_model_section = """
-    <div id="self-model">
-        <h2>Self-Model: Agent States and Configurations</h2>
-        <pre id="agent-states">{agent_states}</pre>
-    </div>
-    """.format(agent_states=str(engine.get_agent_states()))
-
-    goal_hierarchy_section = """
-    <div id="goal-hierarchy">
-        <h2>Goal Hierarchy</h2>
-        <ul id="goals-list">{goals_html}</ul>
-    </div>
-    """.format(goals_html=render_nested_goals(engine.get_goal_hierarchy()))
-
-    bridge_requests_section = """
-    <div id="bridge-requests">
-        <h2>Bridge Request Panels</h2>
-        <form id="bridge-form">
-            <label>Target Agent: <input type="text" name="target_agent"></label><br>
-            <label>Integration Type: <select name="type"><option>inter-agent</option><option>external</option></select></label><br>
-            <button type="submit">Request Bridge</button>
-        </form>
-        <div id="pending-bridges">{pending}</div>
-        <div id="approved-bridges">{approved}</div>
-    </div>
-    """.format(pending=str(engine.get_pending_bridges()), approved=str(engine.get_approved_bridges()))
-
-    return f"""
-    <!DOCTYPE html>
-    <html>
-    <head><title>Evolution Console</title></head>
-    <body>
-        {self_model_section}
-        {goal_hierarchy_section}
-        {bridge_requests_section}
-        <script>
-            document.addEventListener('DOMContentLoaded', function() {{
-                document.getElementById('bridge-form').addEventListener('submit', function(e) {{
-                    e.preventDefault();
-                    const formData = new FormData(this);
-                    // Simulate submission; in production, send to server
-                    console.log('Bridge request:', Object.fromEntries(formData));
-                    alert('Bridge request submitted!');
-                }});
-            }});
-        </script>
-    </body>
-    </html>
-    """
-
-def get_view_data(engine: AutonomousInstitutionEngine) -> str:
-    # New implementation integrating evolution console as the primary view
-    try:
-        return render_evolution_console(engine)
-    except AttributeError as e:
-        # Fallback if engine methods are unavailable
-        return f'<html><body><h1>Error loading view: {str(e)}</h1></body></html>'
