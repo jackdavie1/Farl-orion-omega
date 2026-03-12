@@ -1320,3 +1320,79 @@ from typing import Dict, Any
 from fastapi.responses import JSONResponse
 from datetime import datetime
 import time
+
+from typing import Dict, Any
+
+def telemetry_data_collector() -> Dict[str, Any]:
+    state = engine.get_state()
+    errors = []
+    suggestions = []
+    
+    fragility = state.get('fragility', 0.0)
+    failure_streak = state.get('failure_streak', 0)
+    mutation_status = state.get('mutation_status', 'idle')
+    open_threads = state.get('open_threads', [])
+    guardian_logs = getattr(engine.governance, 'logs', [])
+    
+    # Classify errors based on patterns
+    if fragility > 0.5:
+        errors.append({'type': 'high_fragility', 'value': fragility, 'severity': 'critical'})
+        suggestions.append('increase mutation rate to improve system resilience')
+    
+    if failure_streak >= 3:
+        errors.append({'type': 'persistent_failures', 'value': failure_streak, 'severity': 'warning'})
+        suggestions.append('reset system state or modify mutation parameters')
+    
+    if mutation_status == 'failed':
+        errors.append({'type': 'mutation_failure', 'status': mutation_status, 'severity': 'high'})
+        suggestions.append('analyze last mutation attempt and retry with different parameters')
+    
+    # Resource analysis
+    if len(open_threads) > 10:
+        errors.append({'type': 'resource_exhaustion', 'thread_count': len(open_threads), 'severity': 'warning'})
+        suggestions.append('implement thread pooling or increase resource limits')
+    
+    # Guardian log pattern analysis
+    recent_guardian_entries = guardian_logs[-20:] if guardian_logs else []
+    error_patterns = {}
+    for entry in recent_guardian_entries:
+        if 'error' in str(entry).lower() or 'fail' in str(entry).lower():
+            entry_str = str(entry)
+            if 'timeout' in entry_str.lower():
+                error_patterns['timeout'] = error_patterns.get('timeout', 0) + 1
+            elif 'permission' in entry_str.lower():
+                error_patterns['permission'] = error_patterns.get('permission', 0) + 1
+            elif 'resource' in entry_str.lower():
+                error_patterns['resource'] = error_patterns.get('resource', 0) + 1
+    
+    for pattern, count in error_patterns.items():
+        if count >= 3:
+            errors.append({'type': f'{pattern}_pattern', 'frequency': count, 'severity': 'medium'})
+            if pattern == 'timeout':
+                suggestions.append('increase timeout thresholds or optimize async operations')
+            elif pattern == 'permission':
+                suggestions.append('review and update access controls')
+            elif pattern == 'resource':
+                suggestions.append('scale system resources or optimize resource usage')
+    
+    return {'errors': errors, 'suggestions': suggestions}
+
+async def runtime_telemetry_endpoint():
+    telemetry_data = telemetry_data_collector()
+    
+    response = {
+        'timestamp': time.time(),
+        'system_state': engine.get_state(),
+        'analysis': telemetry_data,
+        'mutation_capacity': getattr(engine, 'mutation_capacity', 0.0),
+        'active_agents': [agent.__class__.__name__ for agent in engine.agents if hasattr(agent, '__class__')]
+    }
+    
+    # Auto-trigger corrections for critical errors
+    critical_errors = [e for e in telemetry_data['errors'] if e.get('severity') == 'critical']
+    if critical_errors:
+        for error in critical_errors:
+            if error['type'] == 'high_fragility':
+                engine.trigger_mutation('emergency_resilience_boost')
+            
+    return response
