@@ -297,21 +297,97 @@ class RuntimeTelemetry:
 
 class CognitionBundle:
     def __init__(self):
-        self.self_model = SelfModel()
-        self.goal_hierarchy = GoalHierarchy()
+        # Full-name attributes
+        self.self_model      = SelfModel()
+        self.goal_hierarchy  = GoalHierarchy()
         self.transaction_ledger = TransactionLedger()
-        self.learning_state = LearningState()
-        self.meta_strategy = MetaStrategy()
+        self.learning_state  = LearningState()
+        self.meta_strategy   = MetaStrategy()
         self.consolidation_engine = ConsolidationEngine()
-        self.bridge_orchestrator = BridgeOrchestrator()
-        self.candidate_search = CandidateSearch()
-        self.bias_detector = BiasDetector()
-        self.repair_library = RepairLibrary()
+        self.bridge_orchestrator  = BridgeOrchestrator()
+        self.candidate_search     = CandidateSearch()
+        self.bias_detector   = BiasDetector()
+        self.repair_library  = RepairLibrary()
         self.runtime_telemetry = RuntimeTelemetry()
 
+        # Short-name aliases used by engine.py and generator.py
+        self.goals        = self.goal_hierarchy
+        self.transactions = self.transaction_ledger
+        self.learning     = self.learning_state
+        self.meta         = self.meta_strategy
+        self.consolidation = self.consolidation_engine
+        self.bridge       = self.bridge_orchestrator
+        self.candidates   = self.candidate_search
+        self.bias         = self.bias_detector
+        self.repair       = self.repair_library
+        self.telemetry    = self.runtime_telemetry
+
     def wire_to_engine(self, engine):
-        # Wire all components to engine as needed
         pass
+
+    # ── Method proxies expected by engine.py ─────────────────────────────────
+
+    def begin_transaction(self, *args, **kwargs):
+        return self.transaction_ledger.begin(*args, **kwargs) if hasattr(self.transaction_ledger, "begin") else None
+
+    def elect_objective(self, *args, **kwargs):
+        return self.goal_hierarchy.elect_objective(*args, **kwargs) if hasattr(self.goal_hierarchy, "elect_objective") else None
+
+    def load(self, *args, **kwargs):
+        return None
+
+    def meta_evaluate(self, *args, **kwargs):
+        return self.meta_strategy.evaluate(*args, **kwargs) if hasattr(self.meta_strategy, "evaluate") else {}
+
+    def record_outcome(self, *args, **kwargs):
+        return self.learning_state.record(*args, **kwargs) if hasattr(self.learning_state, "record") else None
+
+    def get_synthesis_enrichment(self, context: str = "") -> str:
+        parts = []
+        try:
+            obj = self.goal_hierarchy.top_objective()
+            if obj:
+                parts.append(f"Top objective: {obj}")
+        except Exception:
+            pass
+        try:
+            rate = self.bias_detector.suppression_rate
+            if rate > 0:
+                parts.append(f"Bias suppression rate: {rate:.2f}")
+        except Exception:
+            pass
+        return " | ".join(parts) if parts else ""
+
+    def scan_output_for_bias(self, text: str, context: str = "") -> dict:
+        try:
+            return self.bias_detector.scan(text, context)
+        except Exception:
+            return {"suppressed": False, "patterns_hit": [], "severity": "none"}
+
+    def to_dict(self) -> dict:
+        """Serialise full cognition state for get_state() / /view/live endpoint."""
+        def _safe(fn):
+            try:
+                return fn()
+            except Exception:
+                return {}
+
+        return {
+            "self_model":          _safe(lambda: self.self_model.__dict__ if hasattr(self.self_model, "__dict__") else {}),
+            "goals":               _safe(lambda: self.goal_hierarchy.to_dict() if hasattr(self.goal_hierarchy, "to_dict") else {}),
+            "learning":            _safe(lambda: self.learning_state.__dict__ if hasattr(self.learning_state, "__dict__") else {}),
+            "meta_mode":           _safe(lambda: self.meta_strategy.mode if hasattr(self.meta_strategy, "mode") else "unknown"),
+            "consolidation_ready": _safe(lambda: self.consolidation_engine.ready if hasattr(self.consolidation_engine, "ready") else False),
+            "bridge_pending":      _safe(lambda: len(self.bridge_orchestrator.pending()) if hasattr(self.bridge_orchestrator, "pending") else 0),
+            "candidates":          _safe(lambda: self.candidate_search.top(3) if hasattr(self.candidate_search, "top") else []),
+            "bias_suppression_rate":   _safe(lambda: self.bias_detector.suppression_rate),
+            "bias_total_scanned":      _safe(lambda: self.bias_detector.total_scanned),
+            "bias_top_patterns":       _safe(lambda: self.bias_detector.top_suppression_patterns(3)),
+            "telemetry_category_counts": _safe(lambda: self.runtime_telemetry.category_counts),
+            "telemetry_last_error":    _safe(lambda: self.runtime_telemetry.last_error),
+            "repair_table_size":       _safe(lambda: len(self.repair_library.table)),
+            "repair_success_by_fix":   _safe(lambda: self.repair_library.success_by_fix),
+        }
 
 
 def semantic_check_live(code: str) -> bool:
