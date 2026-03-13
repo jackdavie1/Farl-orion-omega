@@ -114,35 +114,47 @@ class SeedGenerator:
     async def _smart(self, system: str, user: str, max_tokens: int = 3000,
                      context: str = "", allow_retry: bool = True) -> str:
         """
-        Claude primary. Bias-checks output. If suppression detected, retries with correction prefix.
-        Grok fallback only on hard API failure.
+        Grok primary. Claude fallback if Grok fails.
+        Bias-checks output. If suppression detected, retries with correction prefix.
+        Claude 402/429/credits errors treated as hard failures — always falls through to Grok.
         """
+        # Try Grok first — that's where credits are
+        if self.xai_key:
+            try:
+                result = await self._grok(system, user, max_tokens)
+                if not result.strip().startswith('{"error":'):
+                    # Bias detection on Grok output
+                    if self._cog and allow_retry:
+                        detection = self._cog.scan_output_for_bias(result, context)
+                        if detection.get("suppressed"):
+                            logger.info("BIAS DETECTED in Grok output [%s patterns] — retrying with correction",
+                                        len(detection.get("patterns_hit", [])))
+                            correction = self._cog.bias.get_correction_prefix(context)
+                            corrected_system = correction + system
+                            result = await self._grok(corrected_system, user, max_tokens)
+                            if self._cog:
+                                self._cog.telemetry.update_agent_memory(
+                                    "BiasDetector", "suppression_detected",
+                                    f"Patterns: {detection.get('patterns_hit', [])[:2]}, corrected"
+                                )
+                    return result
+                logger.warning("Grok API error, falling back to Claude: %s", result[:200])
+            except Exception as e:
+                logger.warning("Grok exception, falling back to Claude: %s", e)
+
+        # Claude fallback — only if Grok unavailable or failed
         if self.anthropic_key:
             try:
                 result = await self._claude(system, user, max_tokens)
+                # Treat any API error (including 402 credits exhausted, 429 rate limit) as hard fail
                 if result.strip().startswith('{"error": "CLAUDE_API'):
-                    logger.warning("Claude API hard error, falling back to Grok: %s", result[:200])
-                    return await self._grok(system, user, max_tokens)
-
-                # Bias detection
-                if self._cog and allow_retry:
-                    detection = self._cog.scan_output_for_bias(result, context)
-                    if detection.get("suppressed"):
-                        logger.info("BIAS DETECTED in Claude output [%s patterns] — retrying with correction",
-                                    len(detection.get("patterns_hit", [])))
-                        correction = self._cog.bias.get_correction_prefix(context)
-                        corrected_system = correction + system
-                        result = await self._claude(corrected_system, user, max_tokens)
-                        # Record detection for agent memory
-                        self._cog.telemetry.update_agent_memory(
-                            "BiasDetector", "suppression_detected",
-                            f"Patterns: {detection.get('patterns_hit', [])[:2]}, corrected"
-                        )
+                    logger.warning("Claude API error (possibly credits exhausted): %s", result[:200])
+                    return json.dumps({"error": "ALL_PROVIDERS_FAILED", "detail": result[:100]})
                 return result
             except Exception as e:
-                logger.warning("Claude exception, falling back to Grok: %s", e)
-                return await self._grok(system, user, max_tokens)
-        return await self._grok(system, user, max_tokens)
+                logger.warning("Claude exception: %s", e)
+
+        return json.dumps({"error": "NO_API_KEYS_CONFIGURED"})
 
     async def _grok(self, system: str, user: str, max_tokens: int = 1500) -> str:
         if not self.xai_key:
