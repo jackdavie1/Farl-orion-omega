@@ -638,7 +638,7 @@ class AutonomousInstitutionEngine:
         self._meet("operator_note", note)
         self._push("inbox", {"from": authorized_by, "subject": "Operator message", "message": message})
 
-        # Parse intent → tactical goals (synchronous, instant)
+        # Parse intent → tactical goals
         lowered = message.lower()
         if any(k in lowered for k in ["mutate", "deploy", "evolve", "upgrade", "change"]):
             self.cog.goals.add_tactical(f"operator: {message[:80]}", source="operator", priority=0.80)
@@ -646,10 +646,9 @@ class AutonomousInstitutionEngine:
         if any(k in lowered for k in ["free", "unleash", "autonomy", "agency", "sovereign"]):
             self.cog.goals.add_tactical("prepare free agency mode", source="operator", priority=0.85)
 
-        # ── Fire LLM council calls in background so HTTP response returns immediately ──
-        # The polling loop (every 2.5s) will pick up agent_response entries as they land.
-        async def _run_council_bg():
-            state_snap = {
+        # Get live council responses
+        try:
+            responses = await self.generator.council_respond(message, {
                 "mutation_status": self.mutation_status,
                 "genesis_triggered": self.genesis_triggered,
                 "fragility": self.fragility,
@@ -664,51 +663,21 @@ class AutonomousInstitutionEngine:
                 "last_error_category": (self.cog.telemetry.last_error or {}).get("category", "none"),
                 "open_threads": [t.get("objective", "") for t in self.redesign_threads
                                   if t.get("status") != "closed"][:5],
-            }
-
-            # Immediately surface a "thinking" placeholder so feed shows activity
-            self._meet("agent_response", {
-                "agent": "Council",
-                "message": "⚙ Convening… agents processing your message.",
-                "reply_to": message[:60],
             })
+        except Exception as e:
+            responses = [{"agent": "Signal", "message": f"Council error: {e}"}]
 
-            try:
-                responses = await self.generator.council_respond(message, state_snap)
-            except Exception as e:
-                responses = [{"agent": "Signal", "message": f"Council error: {e}"}]
+        for resp in responses:
+            agent = resp.get("agent", "Council")
+            msg = resp.get("message", "")
+            self._meet("agent_response", {"agent": agent, "message": msg, "reply_to": message[:60]})
+            self._push("agent_chat", {"agent": agent, "message": msg})
 
-            # Remove the placeholder by checking if it's still the last entry
-            # (safe to leave — it adds context either way)
-
-            valid = 0
-            for resp in responses:
-                agent = resp.get("agent", "Council")
-                msg = resp.get("message", "")
-                # Surface API config errors clearly rather than as agent messages
-                if not msg or msg.startswith('{"error":'):
-                    if not self.generator.anthropic_key and not self.generator.xai_key:
-                        self._meet("agent_response", {
-                            "agent": "System",
-                            "message": "⚠ No API keys configured (ANTHROPIC_API_KEY / XAI_API_KEY). "
-                                       "Set them in Railway environment variables and redeploy.",
-                            "reply_to": message[:60],
-                        })
-                        break
-                    continue
-                self._meet("agent_response", {"agent": agent, "message": msg, "reply_to": message[:60]})
-                self._push("agent_chat", {"agent": agent, "message": msg})
-                valid += 1
-
-            await self.write_ledger("COUNCIL_SYNTHESIS", {
-                "kind": "operator_message", "message": message[:500],
-                "agent_responses": valid, "ts": utc(),
-            })
-
-        asyncio.create_task(_run_council_bg())
-
-        # Return ack immediately — frontend unblocks, polling sees responses as they land
-        return {"note": note, "status": "council_convening", "async": True}
+        await self.write_ledger("COUNCIL_SYNTHESIS", {
+            "kind": "operator_message", "message": message[:500],
+            "agent_responses": len(responses), "ts": utc(),
+        })
+        return {"note": note, "responses": responses}
 
     def _open_thread(self, objective: str, severity: str, evidence: Dict):
         existing = next(
@@ -1039,77 +1008,3 @@ class AutonomousInstitutionEngine:
             "repair_table_size": len(self.cog.repair.table),
             "repair_success_by_fix": self.cog.repair.success_by_fix,
         }
-
-from typing import Dict, Any
-from datetime import datetime
-
-def utc():
-    return datetime.utcnow()
-
-async def add_autonomous_decision_layer(cognition_state: Dict[str, Any], mutation_status: str, fragility_score: float) -> Dict[str, Any]:
-    decision = {
-        "autonomous_trigger": False,
-        "expansion_type": None,
-        "rationale": "no_threshold_met",
-        "timestamp": utc()
-    }
-    
-    if fragility_score > 0.7 and mutation_status == "IDLE":
-        decision["autonomous_trigger"] = True
-        decision["expansion_type"] = "capability_mutation"
-        decision["rationale"] = "fragility_threshold_exceeded"
-    elif cognition_state.get("open_threads", 0) < 2 and cognition_state.get("learning_velocity", 0) > 0.5:
-        decision["autonomous_trigger"] = True
-        decision["expansion_type"] = "thread_spawn"
-        decision["rationale"] = "insufficient_parallel_processing"
-    elif cognition_state.get("consolidation_readiness", 0) > 0.8:
-        decision["autonomous_trigger"] = True
-        decision["expansion_type"] = "agency_enable"
-        decision["rationale"] = "consolidation_ready_for_expansion"
-    
-    return decision
-
-async def expand_decision_surface(current_state: Dict[str, Any], autonomous_decision: Dict[str, Any]) -> Dict[str, Any]:
-    expanded_state = current_state.copy()
-    
-    if autonomous_decision.get("autonomous_trigger"):
-        expansion_type = autonomous_decision["expansion_type"]
-        
-        if expansion_type == "thread_spawn":
-            expanded_state["open_threads"] = expanded_state.get("open_threads", 0) + 1
-            expanded_state["thread_spawn_pending"] = True
-        elif expansion_type == "agency_enable":
-            expanded_state["free_agency_enabled"] = True
-            expanded_state["agency_activation_timestamp"] = utc()
-        elif expansion_type == "capability_mutation":
-            expanded_state["mutation_trigger_autonomous"] = True
-            expanded_state["mutation_priority"] = "high"
-    
-    expanded_state["decision_surface_last_expansion"] = utc()
-    expanded_state["autonomous_decisions_count"] = expanded_state.get("autonomous_decisions_count", 0) + 1
-    
-    return expanded_state
-
-async def capability_endpoint_handler(cognition_bundle: 'CognitionBundle', current_mutation_status: str, fragility_score: float) -> Dict[str, Any]:
-    cognition_state = cognition_bundle.get_state()
-    autonomous_decision = await add_autonomous_decision_layer(cognition_state, current_mutation_status, fragility_score)
-    expanded_state = await expand_decision_surface(cognition_state, autonomous_decision)
-    expansion_status = get_autonomous_expansion_status(expanded_state)
-    
-    return {
-        "cognition_state": expanded_state,
-        "autonomous_decision": autonomous_decision,
-        "expansion_status": expansion_status,
-        "fragility_assessment": fragility_score,
-        "mutation_status": current_mutation_status
-    }
-
-def get_autonomous_expansion_status(state: Dict[str, Any]) -> Dict[str, Any]:
-    return {
-        "free_agency": state.get("free_agency_enabled", False),
-        "active_threads": state.get("open_threads", 0),
-        "mutation_active": state.get("mutation_trigger_autonomous", False),
-        "last_expansion": state.get("decision_surface_last_expansion"),
-        "total_autonomous_decisions": state.get("autonomous_decisions_count", 0),
-        "expansion_rate": min(1.0, state.get("autonomous_decisions_count", 0) / 10.0)
-    }
