@@ -594,3 +594,67 @@ class SeedGenerator:
             if not unsafe2 and all(isinstance(v, str) and len(v) > 80 for v in fm.values()):
                 return {"code_map": fm, "rationale": refined.get("rationale", "Refined")}
         return {"code_map": code_map, "rationale": draft.get("rationale", ""), "critique_warning": critique[:400]}
+
+import httpx
+import re
+from typing import List, Dict, Any
+
+async def scrape_github_trending() -> List[Dict[str, Any]]:
+    async with httpx.AsyncClient() as client:
+        resp = await client.get('https://github.com/trending?since=daily')
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, 'html.parser')
+        repos = []
+        for item in soup.select('.Box-row')[:10]:
+            link = item.select_one('h3 a')
+            if link:
+                repo_url = 'https://github.com' + link['href']
+                repo_name = link['href'].strip('/').split('/')[-1]  # clean repo name
+                key_files = ['main.py', 'app.py', 'core.py', 'engine.py', 'index.py']
+                stars_elem = item.select_one('[data-view-component="true"].Counter')
+                stars = stars_elem.text.strip() if stars_elem else '0'
+                repos.append({
+                    'name': repo_name,
+                    'url': repo_url,
+                    'files': key_files,
+                    'stars': stars
+                })
+        return repos
+
+def extract_mutation_patterns(html_content: str) -> List[Dict[str, str]]:
+    soup = BeautifulSoup(html_content, 'html.parser')
+    code_blocks = soup.find_all('pre', attrs={'class': re.compile(r'code|highlight|javascript|python')})
+    patterns = []
+    recursion_pat = re.compile(r'def\s+(\w+)\s*\([^)]*\):.*?\1\s*\(', re.DOTALL)
+    selfmod_pat = re.compile(r'exec\(|eval\(|compile\(|ast\.', re.I)
+    agent_pat = re.compile(r'async\s+def\s+(task|agent|worker|loop)', re.I)
+    for i, block in enumerate(code_blocks):
+        code = block.get_text()
+        if recursion_pat.search(code):
+            patterns.append({'type': 'recursion', 'code': code[:500], 'source': f'block_{i}' })
+        if selfmod_pat.search(code):
+            patterns.append({'type': 'selfmod', 'code': code[:500], 'source': f'block_{i}' })
+        if agent_pat.search(code):
+            patterns.append({'type': 'agentic', 'code': code[:500], 'source': f'block_{i}' })
+    return patterns
+
+async def integrate_scraped_mutations(repos: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    mutations = []
+    async with httpx.AsyncClient() as client:
+        for repo in repos:
+            for file in repo['files']:
+                file_url = f"{repo['url']}/blob/main/{file}"
+                try:
+                    resp = await client.get(file_url)
+                    resp.raise_for_status()
+                    file_patterns = extract_mutation_patterns(resp.text)
+                    for pat in file_patterns:
+                        pat.update({
+                            'repo': repo['name'],
+                            'file': file,
+                            'url': file_url
+                        })
+                        mutations.append(pat)
+                except httpx.HTTPStatusError:
+                    continue  # skip 404s
+    return mutations
