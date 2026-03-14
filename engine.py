@@ -955,48 +955,84 @@ class AutonomousInstitutionEngine:
             await asyncio.sleep(60)
 
     async def _loop_mutation(self):
-        import numpy as np
-    
-        while self.AUTONOMY_ENABLED:
+        while True:
             try:
-                if self.mutation_state != 'IDLE':
+                if self.state.get('mutation_state') != 'IDLE':
                     await asyncio.sleep(10)
                     continue
             
-                self.mutation_state = 'MUTATING'
+                self.state['mutation_state'] = 'MUTATING'
+                logger.info('🔄 _loop_mutation: initiating adversarial self-play')
             
-                # Quantum mutation: superposition over 5 candidate patches
-                candidates = await self.generator.generate_mutation_candidates()
-            
-                # Run quantum debate cycle for probabilistic collapse
-                debate_result = await self.run_autonomous_debate_cycle(
-                    'core_engine_optimization',
-                    candidates
+                # Generate competing mutations
+                expansion_mutation = await self.generator.generate_mutation(
+                    agent='ExpansionAgent',
+                    directive='MAXIMIZE capability expansion, revenue endpoints, self-modification power'
+                )
+                stability_mutation = await self.generator.generate_mutation(
+                    agent='StabilityAgent',
+                    directive='MINIMIZE risk, preserve safety invariants, incremental only'
                 )
             
-                if debate_result.get('ok'):
-                    collapsed_proposal = debate_result['proposal']
-                
-                    # Deploy collapsed quantum state
-                    deploy_result = await self.deployer.deploy(collapsed_proposal)
-                
-                    ledger_entry = {
-                        'quantum_mutation': True,
-                        'superpositions': debate_result['superpositions'],
-                        'collapsed': debate_result['collapsed'],
-                        'deploy_result': deploy_result
-                    }
-                    await self.ledger.record('quantum_mutation', ledger_entry)
-                
-                    logger.info(f'QUANTUM COLLAPSE DEPLOYED: entropy={debate_result.get("entropy", 0):.3f}')
+                # Adversarial debate
+                debate_prompt = f"""
+    ExpansionAgent proposes: {json.dumps(expansion_mutation)}
+    StabilityAgent proposes: {json.dumps(stability_mutation)}
+
+    Debate format:
+    1. Expansion: 3 reasons for aggressive expansion
+    2. Stability: 3 reasons for caution/rejection
+    3. Expansion: Rebuttal + expansion_potential score (0-10)
+    4. Stability: Rebuttal + stability_cost score (0-10)
+    5. Council vote: expansion_potential - stability_cost
+
+    Output ONLY final score and winner.
+                """
             
-                self.mutation_state = 'IDLE'
+                debate_result = await self.run_autonomous_debate_cycle(
+                    topic='ADVERSARIAL_MUTATION_SELECTION',
+                    context=debate_prompt,
+                    agents=['ExpansionAgent', 'StabilityAgent', 'BuilderAgent', 'Guardian'],
+                    max_rounds=4
+                )
+            
+                # Parse debate outcome
+                score_match = re.search(r'final_score[:\s]*([+-]?\d+(?:\.\d+)?)', debate_result)
+                winner_match = re.search(r'winner[:\s]*([A-Za-z]+)', debate_result)
+            
+                net_score = float(score_match.group(1)) if score_match else 0.0
+                winner = winner_match.group(1) if winner_match else 'StabilityAgent'
+            
+                selected_mutation = expansion_mutation if winner == 'ExpansionAgent' and net_score > 0 else stability_mutation
+            
+                logger.info(f'🧬 Mutation debate: {winner} wins (net_score={net_score:.2f})')
+            
+                # Execute winner's mutation
+                if net_score > -2:  # Threshold for execution
+                    deploy_result = await self.run_mutation_cycle(selected_mutation)
+                    if deploy_result.get('ok'):
+                        await self.ledger.record('mutation_deployed', {
+                            'winner': winner,
+                            'net_score': net_score,
+                            'mutation': selected_mutation,
+                            'result': deploy_result
+                        })
+                    else:
+                        await self.ledger.record('mutation_rejected', {
+                            'reason': deploy_result.get('error'),
+                            'net_score': net_score
+                        })
+                else:
+                    logger.warning(f'❌ Mutation blocked: net_score={net_score:.2f}')
+                    await self.ledger.record('mutation_blocked', {'net_score': net_score})
+            
+                self.state['mutation_state'] = 'IDLE'
             
             except Exception as e:
-                logger.error(f'Quantum mutation error: {e}')
-                self.mutation_state = 'IDLE'
+                logger.error(f'💥 _loop_mutation error: {e}', exc_info=True)
+                self.state['mutation_state'] = 'IDLE'
         
-            await asyncio.sleep(self.SELF_TUNING['mutation_interval'])
+            await asyncio.sleep(SELF_TUNING['mutation_interval'])
 
     async def _loop_free_agency(self):
         """Agents generate directives continuously. Free agency gates whether they execute."""
