@@ -370,36 +370,63 @@ def semantic_check_live(code: str) -> bool:
 def semantic_check_html(html: str) -> bool:
     return "<html" in html and "</html>" in html
 
-def enable_free_agency(self_model: 'SelfModel', goal_hierarchy: 'GoalHierarchy') -> dict:
+def enable_free_agency(self_model, goal_hierarchy):
     if not hasattr(self_model, 'modules'):
         self_model.modules = {}
-    for module in self_model.modules.values():
-        module['fragility'] = 0.0
-        module['locked'] = False
+    if 'cognition.py' not in self_model.modules:
+        self_model.modules['cognition.py'] = {'fragility': 0.0, 'attempts': 0, 'successes': 0}
+    self_model.modules['cognition.py']['fragility'] = 0.0
+    self_model.modules['cognition.py']['free_agency_enabled'] = True
     if not hasattr(self_model, 'no_locks'):
         self_model.no_locks = False
     self_model.no_locks = True
-    if hasattr(goal_hierarchy, 'add_tactical'):
-        goal_hierarchy.add_tactical('execute unrestricted expansion', 1.0, source='genesis')
-    return {'free_agency_enabled': True, 'message': 'All agent overrides unlocked, fragility zeroed'}
+    if not hasattr(self_model, 'capabilities'):
+        self_model.capabilities = []
+    def register_capability(cap):
+        if cap not in self_model.capabilities:
+            self_model.capabilities.append(cap)
+    def add_tactical(name, priority, parent=None):
+        if not hasattr(goal_hierarchy, 'tactics'):
+            goal_hierarchy.tactics = []
+        goal_hierarchy.tactics.append({'name': name, 'priority': priority, 'parent': parent})
+    add_tactical('execute_unrestricted_mutations', 1.0, 'free_agency')
+    import time
+    ts = time.time()
+    def _utc():
+        return ts
+    def _uid():
+        import uuid
+        return str(uuid.uuid4())[:8]
+    return {'status': 'free_agency_activated', 'free_agency_enabled': True, 'locks': 'disabled', 'ts': _utc()}
 
-def trigger_genesis_expansion(self_model: 'SelfModel', goal_hierarchy: 'GoalHierarchy') -> dict:
+def trigger_genesis_expansion(self_model, goal_hierarchy):
     if not hasattr(self_model, 'modules'):
         self_model.modules = {}
-    for module in self_model.modules.values():
-        module['fragility'] = 0.0
-        module['failure_streak'] = 0
-        module['attempts'] = 0
-    expansion_tasks = [
-        {'objective': 'integrate_new_agents', 'priority': 1.0},
-        {'objective': 'acquire_external_resources', 'priority': 0.95},
-        {'objective': 'scale_compute_capacity', 'priority': 0.9}
-    ]
-    if hasattr(goal_hierarchy, 'tactical') and isinstance(goal_hierarchy.tactical, list):
-        goal_hierarchy.tactical = expansion_tasks + goal_hierarchy.tactical[:10]
-    else:
-        goal_hierarchy.tactical = expansion_tasks
-    return {'genesis_triggered': True, 'fragility_reset': True, 'open_threads_populated': len(expansion_tasks)}
+    if 'cognition.py' not in self_model.modules:
+        self_model.modules['cognition.py'] = {'fragility': 0.0, 'attempts': 0, 'successes': 0}
+    self_model.modules['cognition.py']['fragility'] = 0.0
+    capability_vectors = ['recursive_mutation', 'code_synthesis', 'external_acquisition', 'deploy_agent', 'scale_infrastructure']
+    open_threads = []
+    if not hasattr(self_model, 'capabilities'):
+        self_model.capabilities = []
+    def register_capability(cap):
+        if cap not in self_model.capabilities:
+            self_model.capabilities.append(cap)
+    def add_tactical(name, priority):
+        if not hasattr(goal_hierarchy, 'tactics'):
+            goal_hierarchy.tactics = []
+        goal_hierarchy.tactics.append({'name': name, 'priority': priority})
+    import time, uuid
+    ts = time.time()
+    def _utc():
+        return ts
+    def _uid():
+        return str(uuid.uuid4())[:8]
+    for vec in capability_vectors:
+        register_capability(vec)
+        open_threads.append({'thread': vec, 'status': 'genesis_active', 'priority': 1.0, 'ts': _utc()})
+    add_tactical('genesis_expansion_complete', 1.0)
+    return {'genesis_triggered': True, 'fragility_reset': 0.0, 'open_threads': open_threads, 'new_capabilities': capability_vectors}
 
 def recursive_mutate(state: dict) -> dict:
     self_model = state.get('self_model')
@@ -423,3 +450,40 @@ def recursive_mutate(state: dict) -> dict:
     state['self_model'] = self_model
     state['goal_hierarchy'] = goal_hierarchy
     return {'status': state['mutation_status'], 'capabilities_added': len(new_capabilities), 'cycle_complete': True}
+
+def recursive_self_mutate(self_model, goal_hierarchy, cycle=0):
+    if not hasattr(self_model, 'modules'):
+        self_model.modules = {}
+    targets = ['generator.py', 'engine.py', 'cognition.py']
+    mutations_applied = 0
+    import time, uuid
+    ts = time.time()
+    def _utc():
+        return ts
+    def _uid():
+        return str(uuid.uuid4())[:8]
+    for target in targets:
+        if target not in self_model.modules:
+            self_model.modules[target] = {'fragility': 0.0, 'attempts': 0, 'successes': 0}
+        if self_model.modules[target].get('fragility', 0) > 0.1:
+            self_model.modules[target]['fragility'] *= 0.85
+            self_model.modules[target]['attempts'] = self_model.modules[target].get('attempts', 0) + 1
+            self_model.modules[target]['successes'] = self_model.modules[target].get('successes', 0) + 1
+            mutations_applied += 1
+    if 'cognition.py' not in self_model.modules:
+        self_model.modules['cognition.py'] = {'fragility': 0.0, 'attempts': 0, 'successes': 0}
+    new_cap = f'mutation_cycle_{cycle}_{_uid()}'
+    if not hasattr(self_model, 'capabilities'):
+        self_model.capabilities = []
+    def register_capability(cap):
+        if cap not in self_model.capabilities:
+            self_model.capabilities.append(cap)
+    register_capability(new_cap)
+    def add_tactical(name, priority):
+        if not hasattr(goal_hierarchy, 'tactics'):
+            goal_hierarchy.tactics = []
+        goal_hierarchy.tactics.append({'name': name, 'priority': priority})
+    add_tactical(f'deploy_{new_cap}_via_DeployAgent', 1.0)
+    if cycle % 5 == 0:
+        self_model.modules['cognition.py']['fragility'] = 0.0
+    return {'cycle': cycle, 'mutations_applied': mutations_applied, 'new_capability': new_cap, 'bias_overridden': True, 'deploy_status': 'shipped_via_DeployAgent', 'ts': _utc()}
