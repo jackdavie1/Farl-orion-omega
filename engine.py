@@ -377,105 +377,112 @@ class AutonomousInstitutionEngine:
             return {"status": "meta_blocked", "reason": meta_reason}
 
         async with self.mutation_lock:
-            self.mutation_status = "MUTATING"
-            objective = directive or self._derive_objective()
-            self.last_mutation_objective = objective
-
-            # Begin durable transaction
-            txn = self.cog.begin_transaction(objective)
-            txn_id = txn["transaction_id"]
-            logger.info("MUTATION_START txn=%s: %s", txn_id, objective[:80])
-            self._meet("governance", {"event": "mutation_started", "objective": objective,
-                                      "fragility": self.fragility, "txn_id": txn_id})
-            await self.write_ledger("MUTATION_INITIATED", {
-                "objective": objective, "fragility": self.fragility,
-                "txn_id": txn_id, "ts": utc(),
-            })
-
-            # 1. Collect recent failure context for learning injection
-            failure_context = []
             try:
-                recent_failures = await self.ledger.scan_by_type("MUTATION_FAILED", max_pages=2)
-                for r in recent_failures[:3]:
-                    d = r.get("payload", {})
-                    failure_context.append({
-                        "objective": d.get("objective", d.get("last_objective", ""))[:120],
-                        "reason": d.get("reason", d.get("error", ""))[:200],
-                        "file": str(d.get("touched_modules", d.get("shadow_fail_type", "")))[:80]
-                    })
-            except Exception:
-                pass
+                self.mutation_status = "MUTATING"
+                objective = directive or self._derive_objective()
+                self.last_mutation_objective = objective
 
-            # 1. Synthesize with failure history
-            proposal = await self.generator.synthesize(objective, self.get_state(), failure_context=failure_context)
-            if "error" in proposal and "code_map" not in proposal:
-                self.cog.transactions.update(status="synthesis_failed")
-                self.cog.transactions.close("synthesis_failed")
-                self.cog.record_outcome(objective, [], False, rollback_reason=proposal["error"])
-                await self._failure("SYNTHESIS_FAILED", proposal["error"])
-                self.mutation_status = "IDLE"
-                return {"status": "synthesis_failed", "error": proposal["error"]}
+                # Begin durable transaction
+                txn_id = self.cog.begin_transaction(objective)
+                logger.info("MUTATION_START txn=%s: %s", txn_id, objective[:80])
+                self._meet("governance", {"event": "mutation_started", "objective": objective,
+                                          "fragility": self.fragility, "txn_id": txn_id})
+                await self.write_ledger("MUTATION_INITIATED", {
+                    "objective": objective, "fragility": self.fragility,
+                    "txn_id": txn_id, "ts": utc(),
+                })
 
-            code_map = proposal.get("code_map", {})
-            if not code_map:
-                self.cog.transactions.close("no_changes")
-                self.mutation_status = "IDLE"
-                return {"status": "no_changes"}
+                # 1. Collect recent failure context for learning injection
+                failure_context = []
+                try:
+                    recent_failures = await self.ledger.scan_by_type("MUTATION_FAILED", max_pages=2)
+                    for r in recent_failures[:3]:
+                        d = r.get("payload", {})
+                        failure_context.append({
+                            "objective": d.get("objective", d.get("last_objective", ""))[:120],
+                            "reason": d.get("reason", d.get("error", ""))[:200],
+                            "file": str(d.get("touched_modules", d.get("shadow_fail_type", "")))[:80]
+                        })
+                except Exception:
+                    pass
 
-            touched_modules = list(code_map.keys())
-            self.cog.transactions.update(touched_modules=touched_modules)
+                # 1. Synthesize with failure history
+                proposal = await self.generator.synthesize(objective, self.get_state(), failure_context=failure_context)
+                if "error" in proposal and "code_map" not in proposal:
+                    self.cog.transactions.update(status="synthesis_failed")
+                    self.cog.transactions.close("synthesis_failed")
+                    self.cog.record_outcome(objective, [], False, rollback_reason=proposal["error"])
+                    await self._failure("SYNTHESIS_FAILED", proposal["error"])
+                    self.mutation_status = "IDLE"
+                    return {"status": "synthesis_failed", "error": proposal["error"]}
 
-            # 2. Shadow verify
-            sv_ok, sv_msg, sv_checks = await self.truth.verify_shadow(code_map)
-            self.cog.transactions.update(
-                status="shadow_verified" if sv_ok else "shadow_vetoed",
-                shadow_checks=sv_checks,
-            )
-            self._push("governance", {"event": "shadow_result", "ok": sv_ok,
-                                       "reason": sv_msg, "checks": sv_checks, "txn_id": txn_id})
-            if not sv_ok:
-                self.cog.record_outcome(objective, touched_modules, False,
-                                        shadow_fail_type=sv_msg)
-                self.cog.transactions.close("shadow_vetoed")
-                await self._failure("SHADOW_VETO", sv_msg)
-                await self._persist_cognition()
-                self.mutation_status = "IDLE"
-                return {"status": "shadow_vetoed", "reason": sv_msg}
+                code_map = proposal.get("code_map", {})
+                if not code_map:
+                    self.cog.transactions.close("no_changes")
+                    self.mutation_status = "IDLE"
+                    return {"status": "no_changes"}
 
-            # 3. Deploy
-            dr = await self.deployer.deploy(
-                code_map, f"Orion auto: {objective[:80]} [{utc()[:16]}]"
-            )
-            if not dr.get("ok"):
-                self.cog.record_outcome(objective, touched_modules, False,
-                                        rollback_reason=dr.get("error", ""))
-                self.cog.transactions.close("deploy_failed")
-                await self._failure("DEPLOY_FAILED", dr.get("error", ""))
-                await self._persist_cognition()
-                self.mutation_status = "IDLE"
-                return {"status": "deploy_failed", "error": dr.get("error")}
+                touched_modules = list(code_map.keys())
+                self.cog.transactions.update(touched_modules=touched_modules)
 
-            parent_sha, new_sha = dr["parent_sha"], dr["new_sha"]
-            self.last_anchor_sha = parent_sha
-            self.probation_target_sha = new_sha
-            self.cog.transactions.update(
-                status="probation",
-                parent_sha=parent_sha,
-                target_sha=new_sha,
-                deploy_result=dr,
-            )
+                # 2. Shadow verify
+                sv_ok, sv_msg, sv_checks = await self.truth.verify_shadow(code_map)
+                self.cog.transactions.update(
+                    status="shadow_verified" if sv_ok else "shadow_vetoed",
+                    shadow_checks=sv_checks,
+                )
+                self._push("governance", {"event": "shadow_result", "ok": sv_ok,
+                                           "reason": sv_msg, "checks": sv_checks, "txn_id": txn_id})
+                if not sv_ok:
+                    self.cog.record_outcome(objective, touched_modules, False,
+                                            shadow_fail_type=sv_msg)
+                    self.cog.transactions.close("shadow_vetoed")
+                    await self._failure("SHADOW_VETO", sv_msg)
+                    await self._persist_cognition()
+                    self.mutation_status = "IDLE"
+                    return {"status": "shadow_vetoed", "reason": sv_msg}
 
-            prob = {
-                "status": "PROBATION", "target_sha": new_sha, "anchor_sha": parent_sha,
-                "objective": objective, "fragility": self.fragility,
-                "failure_streak": self.failure_streak, "txn_id": txn_id, "ts": utc(),
-            }
-            await self.write_ledger("DEPLOYMENT_INITIATED", prob)
-            self.mutation_status = "PROBATION"
-            logger.info("PROBATION: target=%s anchor=%s txn=%s", new_sha, parent_sha, txn_id)
-            asyncio.create_task(self._enforce_probation(prob))
-            return {"status": "probation_started", "target_sha": new_sha, "txn_id": txn_id}
+                # 3. Deploy
+                dr = await self.deployer.deploy(
+                    code_map, f"Orion auto: {objective[:80]} [{utc()[:16]}]"
+                )
+                if not dr.get("ok"):
+                    self.cog.record_outcome(objective, touched_modules, False,
+                                            rollback_reason=dr.get("error", ""))
+                    self.cog.transactions.close("deploy_failed")
+                    await self._failure("DEPLOY_FAILED", dr.get("error", ""))
+                    await self._persist_cognition()
+                    self.mutation_status = "IDLE"
+                    return {"status": "deploy_failed", "error": dr.get("error")}
 
+                parent_sha, new_sha = dr["parent_sha"], dr["new_sha"]
+                self.last_anchor_sha = parent_sha
+                self.probation_target_sha = new_sha
+                self.cog.transactions.update(
+                    status="probation",
+                    parent_sha=parent_sha,
+                    target_sha=new_sha,
+                    deploy_result=dr,
+                )
+
+                prob = {
+                    "status": "PROBATION", "target_sha": new_sha, "anchor_sha": parent_sha,
+                    "objective": objective, "fragility": self.fragility,
+                    "failure_streak": self.failure_streak, "txn_id": txn_id, "ts": utc(),
+                }
+                await self.write_ledger("DEPLOYMENT_INITIATED", prob)
+                self.mutation_status = "PROBATION"
+                logger.info("PROBATION: target=%s anchor=%s txn=%s", new_sha, parent_sha, txn_id)
+                asyncio.create_task(self._enforce_probation(prob))
+                return {"status": "probation_started", "target_sha": new_sha, "txn_id": txn_id}
+            except Exception as e:
+                logger.error("MUTATION_UNHANDLED: %s", e)
+                await self.write_ledger("MUTATION_FAILED", {"reason": str(e), "ts": utc()})
+                raise
+            finally:
+                if self.mutation_status == "MUTATING":
+                    self.mutation_status = "IDLE"
+                    logger.warning("MUTATION_LOCK_RELEASED: status reset to IDLE in finally")
     def _derive_objective(self) -> str:
         # Free agency: agent directive queue
         if self.free_agency_enabled and self.agent_directive_queue:
