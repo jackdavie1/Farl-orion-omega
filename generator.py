@@ -206,10 +206,26 @@ def _extract_json(text: str) -> Optional[Any]:
     return None
 
 
-def _bayesian_score(successes: int, attempts: int) -> float:
-    """Beta-Binomial posterior mean. Prior Beta(3,7) = 30% base rate."""
-    return (3 + successes) / (10 + attempts)
-
+def _bayesian_score(proposal: dict, historical_data: list) -> float:
+    '''Bayesian scoring for mutation proposals. P(deploy_success) target >0.85'''
+    if not historical_data:
+        return 0.5  # uniform prior
+    
+    successes = sum(1 for d in historical_data if d.get('deployed', False) and d.get('success', False))
+    total = len(historical_data)
+    prior_success = 0.3  # pessimistic prior
+    
+    # Beta prior update
+    alpha = 1 + successes
+    beta = 1 + (total - successes)
+    posterior_mean = alpha / (alpha + beta)
+    
+    # Proposal-specific factors
+    syntax_score = 1.0 if proposal.get('supergrok_approved', False) else 0.6
+    expansion_potential = 1.2 if 'revenue' in str(proposal.get('rationale', '')).lower() else 1.0
+    
+    score = posterior_mean * syntax_score * expansion_potential
+    return min(score, 1.0)
 
 def _entropy(probs: List[float]) -> float:
     return -sum(p * math.log2(p + 1e-9) for p in probs if p > 0)
