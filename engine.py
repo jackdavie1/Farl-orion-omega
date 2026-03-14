@@ -428,51 +428,8 @@ class AutonomousInstitutionEngine:
 
     # ── Objective derivation (v18 FIX — self-method, no numpy) ────────────────
 
-    def _derive_objective(self) -> str:
-        """
-        Derive mutation objective from:
-        1. Agent directive queue (highest priority — agents proposed this)
-        2. Cognitive goal hierarchy (scored election)
-        3. Research stack insights
-        4. Fallback structural improvements
-        """
-        # 1. Agent directives first (these are specific, tested ideas)
-        if self.agent_directive_queue:
-            directive = self.agent_directive_queue.pop(0)
-            obj = directive.get("directive", "expand_capabilities")
-            agent = directive.get("agent", "System")
-            logger.info("OBJECTIVE from agent %s: %s", agent, obj[:80])
-            return obj
-
-        # 2. Cognitive election
-        seeds = []
-        if hasattr(self.generator, '_research_stack') and self.generator._research_stack:
-            top_research = self.generator._research_stack[-1]
-            insight = top_research.get("insight", "")
-            if insight and len(insight) > 20 and not insight.startswith('{"error"'):
-                seeds.append({"objective": insight[:120], "priority": 0.7})
-
-        winner, score, ranking = self.cog.elect_objective(
-            seeds=seeds,
-            fragility=self.fragility,
-            free_agency=self.free_agency_enabled,
-        )
-
-        # 3. Bayesian scoring to pick best from candidates
-        candidates = [winner]
-        if ranking:
-            candidates += [r.get("objective", "") for r in ranking[:3] if r.get("objective")]
-        candidates = [c for c in candidates if c and len(c) > 5]
-
-        if candidates and hasattr(self.generator, '_select_high_entropy_objective'):
-            try:
-                selected = self.generator._select_high_entropy_objective(candidates)
-                if selected:
-                    return selected
-            except Exception:
-                pass
-
-        return winner or "expand_capabilities"
+    async def _derive_objective(self) -> str:
+        return await self.cog_bundle._select_high_entropy_objective(entropy_threshold=0.7)
 
     # ── Mutation cycle ────────────────────────────────────────────────────────
 
