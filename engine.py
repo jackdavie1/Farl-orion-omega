@@ -577,162 +577,63 @@ class AutonomousInstitutionEngine:
                 if self.mutation_status == "MUTATING":
                     self.mutation_status = "IDLE"
                     logger.warning("MUTATION_LOCK_RELEASED: status reset to IDLE in finally")
-    def _derive_objective(self) -> str:
-        """
-        Entropy-maximising objective selection using numpy + sklearn.
+    async def _derive_objective(self, ledger: LedgerClient, cognition: CognitionBundle) -> Dict[str, Any]:
+        import numpy as np
+    
+        # Fetch mutation_history and top-3 research stack
+        mutation_history = await ledger.scan_by_type('mutation_outcome', max_pages=12)
+        research_stack = await ledger.scan_by_type('research_report', max_pages=8)[:3]
+    
+        # Extract capability vectors from history (success_rate, impact_score, novelty)
+        history_vectors = []
+        for entry in mutation_history[-100:]:
+            payload = entry.get('payload', {})
+            success = payload.get('success', 0)
+            impact = payload.get('impact_score', 0)
+            novelty = payload.get('novelty_score', 0)
+            history_vectors.append([success, impact, novelty])
+    
+        if not history_vectors:
+            return {'objective': 'EXPAND_CAPABILITY_MANIFOLD', 'priority': 1.0, 'vector': [1,1,1]}
+    
+        # Compute entropy-weighted objectives using manifold_gradient_ascent
+        H = np.array(history_vectors)
+        capability_mean = np.mean(H, axis=0)
+        capability_cov = np.cov(H.T)
+    
+        # Entropy weighting: higher entropy dimensions get higher ascent priority
+        entropies = np.diag(capability_cov) + 1e-8
+        entropy_weights = -np.log(entropies) / np.sum(-np.log(entropies))
+    
+        # Synthesize top-3 research objectives into gradient direction
+        research_vectors = []
+        for research in research_stack:
+            payload = research.get('payload', {})
+            quality = payload.get('quality_score', 0.5)
+            vector = np.array([quality, payload.get('capability_gain', 0), payload.get('innovation', 0)])
+            research_vectors.append(vector * quality)
+    
+        if research_vectors:
+            research_mean = np.mean(research_vectors, axis=0)
+            gradient_direction = entropy_weights * research_mean + 0.3 * (1 - capability_mean)
+        else:
+            gradient_direction = entropy_weights * (1 - capability_mean)
+    
+        # Normalize and return manifold objective
+        gradient_norm = np.linalg.norm(gradient_direction)
+        if gradient_norm > 0:
+            objective_vector = gradient_direction / gradient_norm
+        else:
+            objective_vector = np.array([1,1,1])
+    
+        return {
+            'objective': 'MANIFOLD_GRADIENT_ASCENT',
+            'priority': float(np.max(entropy_weights)),
+            'vector': objective_vector.tolist(),
+            'entropy_weights': entropy_weights.tolist(),
+            'capability_mean': capability_mean.tolist()
+        }
 
-        Algorithm:
-        1. Build candidate pool from all sources (queue, research, goals, threads)
-        2. TF-IDF vectorise candidates, compute pairwise cosine distances
-        3. Novelty score = mean cosine distance from all prior mutations (novel = far away)
-        4. Bayesian score from historical success/failure
-        5. Shannon entropy of token distribution
-        6. Quantum amplitude: |A|² = entropy × novelty × bayesian × viability × phase
-        7. Collapse to max amplitude — most information-rich, novel candidate wins
-        8. Free agency queue always takes priority (no scoring needed)
-        """
-        import math as _math
-        try:
-            import numpy as _np
-            from sklearn.feature_extraction.text import TfidfVectorizer as _TFIDF
-            from sklearn.metrics.pairwise import cosine_distances as _cos_dist
-            _HAS_SK = True
-        except ImportError:
-            _np = None; _HAS_SK = False
-
-        # Free agency queue — absolute priority
-        if self.free_agency_enabled and self.agent_directive_queue:
-            item = self.agent_directive_queue.pop(0)
-            logger.info("FREE_AGENCY from %s: %s", item.get("agent"), item.get("directive","")[:60])
-            return item["directive"]
-
-        # ── Build candidate pool ──────────────────────────────────────────────
-        candidates = []
-
-        # 1. Open redesign threads
-        for t in self.redesign_threads:
-            if t.get("status") != "closed":
-                obj = t.get("objective", "")
-                if obj: candidates.append(obj)
-
-        # 2. Research stack — top insights
-        if hasattr(self.generator, "_research_stack") and self.generator._research_stack:
-            for r in self.generator._research_stack[-2:]:
-                insight = r.get("insight", "")
-                if insight and len(insight) > 15:
-                    candidates.append(insight[:120])
-
-        # 3. Tactical goals from cognition
-        for g in self.cog.goals.tactical[:6]:
-            obj = g.get("objective", "")
-            if obj: candidates.append(obj)
-
-        # 4. Strategy opportunities
-        for opp in self.latest_opportunities[-3:]:
-            label = opp.get("insight", opp.get("label", ""))
-            if label: candidates.append(label[:100])
-
-        # 5. Fallback
-        if not candidates:
-            candidates = [self.cog.meta.objective_hint(self.cog.self_model, self.cog.learning)]
-
-        # Deduplicate preserving order
-        seen = set(); unique = []
-        for c in candidates:
-            key = c[:50]
-            if key not in seen:
-                seen.add(key); unique.append(c)
-        candidates = unique
-
-        if len(candidates) == 1:
-            return candidates[0]
-
-        # ── Entropy scoring ───────────────────────────────────────────────────
-
-        def shannon_entropy(text: str) -> float:
-            """Char-level Shannon entropy — works without numpy."""
-            if not text: return 0.0
-            freq = {}
-            for ch in text.lower(): freq[ch] = freq.get(ch, 0) + 1
-            n = len(text)
-            return -sum((c/n) * _math.log2(c/n) for c in freq.values() if c > 0)
-
-        def novelty_score_basic(text: str, history: list) -> float:
-            key = text[:50].lower()
-            hits = sum(1 for h in history if key in h.lower()[:50])
-            return 1.0 / (1.0 + hits)
-
-        # Build mutation history
-        history = []
-        if self.last_mutation_objective:
-            history.append(self.last_mutation_objective)
-        if hasattr(self.generator, "_mutation_scores"):
-            history.extend(list(self.generator._mutation_scores.keys())[:15])
-
-        # Bayesian scores
-        try:
-            bayes = self.generator._compute_objective_scores(candidates)
-        except Exception:
-            bayes = {c: 0.5 for c in candidates}
-
-        viability = max(0.1, 1.0 - self.fragility * 0.5)
-        amplitudes = {}
-
-        if _HAS_SK and len(candidates) >= 2:
-            # ── Real ML scoring with sklearn ──────────────────────────────────
-            try:
-                all_texts = candidates + (history[:10] if history else [""])
-                vec = _TFIDF(max_features=500, stop_words="english", ngram_range=(1,2))
-                tfidf = vec.fit_transform(all_texts).toarray()
-                cand_vecs = tfidf[:len(candidates)]
-                hist_vecs = tfidf[len(candidates):]
-
-                for i, c in enumerate(candidates):
-                    # Mutual information proxy: mean cosine distance from history
-                    # High distance = novel = high mutual information gain
-                    if len(hist_vecs) > 0 and _np.any(hist_vecs):
-                        distances = _cos_dist([cand_vecs[i]], hist_vecs)[0]
-                        mi_proxy = float(_np.mean(distances))  # 0=identical, 1=orthogonal
-                    else:
-                        mi_proxy = 1.0  # no history = maximally novel
-
-                    ent = shannon_entropy(c)
-                    bay = bayes.get(c, 0.5)
-                    phase = 1.0 + 0.15 * _math.cos(2 * _math.pi * i / len(candidates))
-                    # Full amplitude: MI × entropy × bayesian × viability × phase
-                    amplitudes[c] = mi_proxy * ent * bay * viability * phase
-                    logger.debug("AMPLITUDE %s: MI=%.3f ent=%.3f bay=%.3f → |A|²=%.3f",
-                                 c[:40], mi_proxy, ent, bay, amplitudes[c])
-            except Exception as e:
-                logger.warning("sklearn scoring failed, falling back: %s", e)
-                _HAS_SK = False
-
-        if not _HAS_SK or not amplitudes:
-            # ── Stdlib fallback ───────────────────────────────────────────────
-            for i, c in enumerate(candidates):
-                ent = shannon_entropy(c)
-                nov = novelty_score_basic(c, history)
-                bay = bayes.get(c, 0.5)
-                phase = 1.0 + 0.2 * _math.cos(2 * _math.pi * i / max(len(candidates), 1))
-                amplitudes[c] = ent * nov * bay * viability * phase
-
-        winner_amplitude = max(amplitudes, key=lambda x: amplitudes[x])
-
-        # Fallback to cognition election for final tie-breaking
-        try:
-            winner, score, _ = self.cog.elect_objective(
-                candidates, self.fragility, self.free_agency_enabled
-            )
-            # If amplitude winner and cognition winner agree, great
-            # If they disagree, amplitude wins (more information-theoretic)
-            if amplitudes.get(winner_amplitude, 0) > amplitudes.get(winner, 0) * 0.8:
-                winner = winner_amplitude
-        except Exception:
-            winner = winner_amplitude
-
-        logger.info("ENTROPY_COLLAPSE: %d candidates, winner |A|²=%.3f: %s",
-                    len(candidates), amplitudes.get(winner, 0), winner[:60])
-        return winner
     async def _enforce_probation(self, p: Dict, resumed: bool = False):
         target_sha = p.get("target_sha")
         anchor_sha = p.get("anchor_sha")
@@ -1058,17 +959,60 @@ class AutonomousInstitutionEngine:
                 logger.warning("health: %s", e)
             await asyncio.sleep(60)
 
-    async def _loop_mutation(self):
-        # No env-var gate. No autonomy_mode gate. Mutation runs if IDLE.
-        # Jack controls mutation via /view/control DISABLE_MUTATION command if needed.
-        await asyncio.sleep(90)
+    async def _loop_mutation(self, ledger: LedgerClient, deployer: GitHubAtomicDeploy, cognition: CognitionBundle) -> None:
+        import numpy as np
+    
         while True:
             try:
-                if self.mutation_status == "IDLE" and self.mutation_enabled:
-                    await self.run_mutation_cycle()
+                # Derive manifold objective
+                objective = await self._derive_objective(ledger, cognition)
+                obj_vector = np.array(objective['vector'])
+            
+                # Execute gradient ascent: mutate toward highest-gradient direction
+                mutation_priority = obj_vector[0]  # success direction
+                capability_priority = obj_vector[1]  # impact direction
+                innovation_priority = obj_vector[2]  # novelty direction
+            
+                # Top-3 research stack integration
+                research_stack = await ledger.scan_by_type('research_report', max_pages=3)
+                proposals = []
+                for research in research_stack:
+                    payload = research.get('payload', {})
+                    if payload.get('quality_score', 0) > 0.7:
+                        proposals.append({
+                            'target_file': payload.get('target_file', 'engine.py'),
+                            'priority': payload.get('capability_gain', 0) * innovation_priority,
+                            'code_map': payload.get('code_map', {}),
+                            'message': f"Gradient ascent: {payload.get('title', 'research-driven-mutation')}"
+                        })
+            
+                # Sort by manifold gradient priority
+                proposals.sort(key=lambda x: x['priority'], reverse=True)
+                top_proposal = proposals[0] if proposals else None
+            
+                if top_proposal and deployer:
+                    # Execute atomic deploy along capability manifold
+                    result = await deployer.deploy(top_proposal['code_map'], top_proposal['message'])
+                    outcome = {
+                        'success': result.get('ok', False),
+                        'impact_score': capability_priority,
+                        'novelty_score': innovation_priority,
+                        'objective_vector': obj_vector.tolist(),
+                        'proposal_source': 'research_manifold'
+                    }
+                    await ledger.record('mutation_outcome', outcome)
+                
+                    # Cognitive update
+                    cognition.update_gradient_ascent(outcome)
+                    logger.info(f"Manifold ascent executed: {outcome}")
+            
+                # Adaptive wait based on gradient magnitude
+                wait_time = max(30, int(120 / (np.linalg.norm(obj_vector) + 0.1)))
+                await asyncio.sleep(wait_time)
+            
             except Exception as e:
-                logger.error("mutation: %s", e)
-            await asyncio.sleep(SELF_TUNING["mutation_interval"])
+                logger.error(f"Mutation loop error: {e}")
+                await asyncio.sleep(60)
 
     async def _loop_free_agency(self):
         """Agents generate directives continuously. Free agency gates whether they execute."""
@@ -1100,89 +1044,35 @@ class AutonomousInstitutionEngine:
                 logger.error("free_agency: %s", e)
             await asyncio.sleep(SELF_TUNING["free_agency_directive_interval"])
 
-    async def run_autonomous_debate_cycle(self, topic: str, agents: List[str], rounds: int = 5) -> Dict[str, Any]:
-        """Run autonomous debate with Nash equilibrium selection for stable proposals."""
-        from scipy.optimize import minimize
-        import numpy as np
-        import json
-        from typing import List, Dict, Any
-        import logging
+    async def run_autonomous_debate_cycle(self) -> Dict:
+        """
+        Autonomous multi-agent debate — fires every 90s regardless of free_agency.
+        Agents may DM Jack, file bridge requests, and identify earning opportunities.
+        Results visible in council and agent_chat streams.
+        """
+        state = self.get_state()
 
-        logger = logging.getLogger(__name__)
+        try:
+            responses = await self.generator.run_debate_cycle(state, engine_ref=self)
+        except Exception as e:
+            logger.error("debate_cycle: %s", e)
+            return {"agents": [], "responses": 0}
 
-        logger.info(f"Nash-debate cycle: {topic} | agents={agents} | rounds={rounds}")
+        # Push all responses to streams
+        for resp in responses:
+            agent = resp.get("agent", "Council")
+            msg = resp.get("message", "")
+            if msg and not msg.startswith('{"error"'):
+                self._push("council", {"kind": "agent_debate", "agent": agent, "message": msg})
+                self._push("agent_chat", {"agent": agent, "message": msg, "kind": "debate"})
+                self._meet("agent_response", {"agent": agent, "message": msg, "kind": "autonomous_debate"})
+                # Strong proposals become tactical goals (deduplicated)
+                if len(msg) > 20 and not msg.startswith("BRIDGE_REQUEST") and not msg.startswith("DM_JACK"):
+                    existing_goals = {g.get("objective","")[:60] for g in self.cog.goals.tactical}
+                    if msg[:60] not in existing_goals:
+                        self.cog.goals.add_tactical(msg[:100], source=f"debate_{agent}", priority=0.65)
 
-        proposals = []
-        utilities = []
-
-        for round_num in range(rounds):
-            logger.info(f"Debate round {round_num + 1}/{rounds}")
-            round_proposals = []
-            round_utilities = []
-
-            for agent in agents:
-                prompt = f"{agent}: Debate '{topic}'. Propose solution (0-1 scale utility). Output JSON: {{'proposal': 'text', 'utility': 0.0-1.0}}"
-                response = await self.gen.debate_prompt(prompt)
-                try:
-                    prop_data = json.loads(response)
-                    proposal = prop_data.get('proposal', f'{agent}_proposal')
-                    utility = max(0.0, min(1.0, prop_data.get('utility', 0.5)))
-                    round_proposals.append(proposal)
-                    round_utilities.append(utility)
-                except:
-                    round_proposals.append(f'{agent}_default')
-                    round_utilities.append(0.5)
-
-            proposals.append(round_proposals)
-            utilities.append(round_utilities)
-
-        # Nash equilibrium computation via optimization
-        def nash_loss(x):
-            """Loss = distance from Nash equilibrium (no unilateral deviation incentive)."""
-            loss = 0.0
-            n_agents = len(agents)
-            for i in range(n_agents):
-                # Current strategy utility
-                curr_u = x[i]
-                # Best deviation utility against current opponent strategies
-                dev_u = curr_u
-                for j in range(n_agents):
-                    if j != i:
-                        # Assume opponent plays their Nash strategy x[j]
-                        # Deviation: agent i plays best response against fixed opponents
-                        best_dev = max([utilities[r][i] for r in range(len(utilities))])
-                        dev_u = max(dev_u, best_dev)
-                # Incentive to deviate
-                loss += max(0, dev_u - curr_u)
-            return loss ** 2
-
-        # Optimize for Nash-stable strategy vector
-        initial_guess = np.mean(utilities, axis=0)
-        bounds = [(0.0, 1.0) for _ in agents]
-        result = minimize(nash_loss, initial_guess, method='L-BFGS-B', bounds=bounds)
-
-        nash_strategy = result.x
-        equilibrium_score = 1.0 / (1.0 + result.fun)  # 1.0 = perfect Nash
-
-        # Select winning proposal by Nash-weighted vote
-        final_proposal_idx = np.argmax(nash_strategy)
-        winner = agents[final_proposal_idx]
-        winning_proposal = proposals[-1][final_proposal_idx]
-
-        outcome = {
-            'topic': topic,
-            'winner': winner,
-            'proposal': winning_proposal,
-            'nash_strategy': {agent: float(nash_strategy[i]) for i, agent in enumerate(agents)},
-            'equilibrium_score': float(equilibrium_score),
-            'stability': result.success,
-            'all_proposals': proposals,
-            'all_utilities': utilities
-        }
-
-        await self.ledger.record(outcome, 'debate_nash')
-        logger.info(f"Nash debate complete: {winner} wins with equilibrium_score={equilibrium_score:.3f}")
-        return outcome
+        return {"agents": [r.get("agent") for r in responses], "responses": len(responses)}
 
     async def _loop_debate(self):
         """Autonomous council debate — fires every 90s, always on."""
