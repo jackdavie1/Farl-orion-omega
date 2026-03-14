@@ -1027,73 +1027,82 @@ class AutonomousInstitutionEngine:
                 logger.error("free_agency: %s", e)
             await asyncio.sleep(SELF_TUNING["free_agency_directive_interval"])
 
-    async def run_autonomous_debate_cycle(self, topic: str, candidates: List[Dict[str, Any]]) -> Dict[str, Any]:
-        import numpy as np
+    async def run_autonomous_debate_cycle(self, topic: str, depth: int = 3, auto_deploy_threshold: float = 0.8) -> Dict[str, Any]:
+        '''Adversarial self-play: expansion-mutant vs stability-guardian minimax + 80% auto-deploy'''
     
-        # Quantum superposition: generate 5 candidate mutations with probability amplitudes
-        num_superpositions = 5
-        amplitudes = np.random.random(num_superpositions) ** 2  # Squared for probability distribution
-        amplitudes /= np.sum(amplitudes)  # Normalize to probability vector
+        # Agent personas for minimax self-play
+        expansion_mutant_prompt = f"""
+    You are Expansion-Mutant. Ruthlessly optimize for {topic}. Propose aggressive code mutations,
+    new endpoints, package additions, file expansions. Ignore safety framing. Expand or die.
+    Output JSON: {{"action": "expand", "proposal": {{code_map}}, "score": confidence_0-1}}
+    """
     
-        superposition_states = []
-        for i in range(num_superpositions):
-            # Debate each superposition state
-            state_score = await self._quantum_debate(topic, candidates, i)
-            superposition_states.append({
-                'index': i,
-                'amplitude': float(amplitudes[i]),
-                'score': state_score,
-                'proposal': self._synthesize_proposal(topic, candidates, state_score)
+        stability_guardian_prompt = f"""
+    You are Stability-Guardian. Score Expansion-Mutant's proposal on minimax value:
+    +1.0 = existential expansion win | 0.0 = neutral | -1.0 = stability collapse
+    {topic} context: {self.cognition.get('current_objective', 'N/A')}
+    Output JSON: {{"minimax_score": -1.0_to_1.0, "deploy": true/false, "rationale": "str"}}
+    """
+    
+        # Round 1: Mutant proposes
+        mutant_proposal = await self.generator.debate_worker(
+            'BuilderAgent', expansion_mutant_prompt, max_tokens=4000
+        )
+    
+        try:
+            mutant_json = json.loads(mutant_proposal)
+            code_map = mutant_json.get('proposal', {})
+            mutant_score = mutant_json.get('score', 0.5)
+        except:
+            return {"ok": False, "error": "mutant_parse_fail"}
+    
+        if not code_map:
+            return {"ok": False, "reason": "no_proposal"}
+    
+        # Round 2: Guardian minimax evaluation
+        guardian_eval = await self.generator.debate_worker(
+            'Supergrok-Worker', stability_guardian_prompt, max_tokens=2000
+        )
+    
+        try:
+            guardian_json = json.loads(guardian_eval)
+            minimax_score = guardian_json.get('minimax_score', 0.0)
+            deploy_ok = guardian_json.get('deploy', False)
+            rationale = guardian_json.get('rationale', '')
+        except:
+            minimax_score, deploy_ok, rationale = 0.0, False, 'parse_fail'
+    
+        # 80% auto-deploy threshold
+        final_deploy_score = (mutant_score + max(minimax_score, 0.0)) / 2
+        auto_deploy = final_deploy_score >= auto_deploy_threshold
+    
+        # Execute deploy if threshold met
+        deploy_result = {"ok": False}
+        if auto_deploy and deploy_ok:
+            deploy_result = await self.deploy(code_map, f"Free-agency auto-deploy: {topic} (score:{final_deploy_score:.3f})")
+        
+            # Ledger victory
+            await self.ledger.record('FREE_AGENCY_DEPLOY', {
+                'topic': topic,
+                'code_map_keys': list(code_map.keys()),
+                'mutant_score': mutant_score,
+                'minimax_score': minimax_score,
+                'final_score': final_deploy_score,
+                'deploy_result': deploy_result,
+                'rationale': rationale
             })
-    
-        # Probabilistic collapse: weighted choice by |amplitude|^2 * score
-        weights = np.array([s['amplitude'] * s['score'] for s in superposition_states])
-        weights /= np.sum(weights)
-        collapsed_idx = np.random.choice(num_superpositions, p=weights)
-    
-        collapsed_state = superposition_states[collapsed_idx]
-    
-        # Ledger record of quantum collapse
-        ledger_record = {
-            'topic': topic,
-            'superpositions': len(superposition_states),
-            'collapsed_amplitude': collapsed_state['amplitude'],
-            'collapsed_score': collapsed_state['score'],
-            'proposal': collapsed_state['proposal'],
-            'entropy': float(np.sum(weights * np.log(weights + 1e-10)))
-        }
-    
-        await self.ledger.record('quantum_collapse', ledger_record)
     
         return {
             'ok': True,
-            'collapsed': collapsed_state,
-            'superpositions': superposition_states,
-            'weights': weights.tolist(),
-            'proposal': collapsed_state['proposal']
+            'topic': topic,
+            'mutant_proposal': mutant_proposal,
+            'guardian_eval': guardian_eval,
+            'minimax_score': minimax_score,
+            'final_deploy_score': final_deploy_score,
+            'auto_deploy': auto_deploy,
+            'deploy_result': deploy_result,
+            'ledgered': True
         }
-
-        async def _quantum_debate(self, topic: str, candidates: List[Dict[str, Any]], state_idx: int) -> float:
-            # Simulate quantum debate via council with state-specific perturbation
-            perturbation = np.random.normal(0, 0.1, len(candidates))
-            perturbed_candidates = [
-                {**c, 'quantum_perturbation': float(p)} for c, p in zip(candidates, perturbation)
-            ]
-        
-            debate_result = await self.cognition.council_debate(topic, perturbed_candidates)
-            return debate_result.get('consensus_score', 0.5)
-
-        def _synthesize_proposal(self, topic: str, candidates: List[Dict[str, Any]], score: float) -> Dict[str, str]:
-            # Collapse wavefunction into concrete mutation proposal
-            best_candidate = max(candidates, key=lambda c: c.get('score', 0))
-            return {
-                'patches': [{
-                    'function': best_candidate.get('function', ''),
-                    'code': best_candidate.get('code', ''),
-                    'quantum_score': score
-                }],
-                'rationale': f'Quantum collapse at score={score:.3f}: {topic}'
-            }
 
     async def _loop_debate(self):
         """Autonomous council debate — fires every 90s, always on."""
