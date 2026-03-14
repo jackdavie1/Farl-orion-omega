@@ -437,136 +437,62 @@ class AutonomousInstitutionEngine:
             logger.info("VOLATILE_STATE: no saved state, using defaults")
         except Exception as e:
             logger.warning("VOLATILE_LOAD_FAILED: %s", e)
-    async def run_mutation_cycle(self, directive: Optional[str] = None) -> Dict:
-        if self.mutation_lock.locked():
-            logger.warning("MUTATION_SKIPPED: lock already held")
-            return {"status": "lock_held"}
-        if self.mutation_status == "QUARANTINE":
-            logger.warning("MUTATION_SKIPPED: QUARANTINE active")
-            return {"status": "quarantined"}
-        if not self.deployer:
-            # This is the most common silent killer — make it visible
-            reason = f"no_deployer: GITHUB_TOKEN={'SET' if os.getenv('GITHUB_TOKEN') else 'MISSING'}, REPO_NAME={'SET' if os.getenv('REPO_NAME') else 'MISSING'}"
-            logger.error("MUTATION_BLOCKED: %s", reason)
-            await self.write_ledger("MUTATION_BLOCKED", {"reason": reason, "ts": utc()})
-            self.last_mutation_objective = f"BLOCKED: {reason}"
-            return {"status": "no_deployer", "reason": reason}
+    async def run_mutation_cycle(self):
+        if self.state != 'IDLE':
+            return {'ok': False, 'reason': f'state_{self.state}'}
+    
+        self.state = 'MUTATING'
+    
+        # Initialize Bayesian beliefs if missing
+        bayes_state = await self.cognition.bayes_state
+        if not bayes_state:
+            bayes_state = {
+                'proposal_success': 0.5,
+                'fragility_prior': 0.3,
+                'operator_trust': {a: 0.5 for a in AUTONOMOUS_AGENTS},
+                'mutation_efficacy': 0.4,
+                'evidence_log': [],
+                'cycle_start': utc()
+            }
+            await self.cognition.update_bayes_state(bayes_state)
+    
+        try:
+            # Prime proposal queue with belief-weighted agents
+            trust_scores = bayes_state['operator_trust']
+            weighted_agents = list(trust_scores.keys())
+            weights = [trust_scores[a] for a in weighted_agents]
+        
+            # Sample agents proportional to trust beliefs
+            selected_agents = random.choices(weighted_agents, weights=weights, k=3)
+        
+            for agent in selected_agents:
+                await self.proposal_queue.signal_agent(agent, {'bayes_state': bayes_state})
+        
+            # Run belief-propagating mutation loop
+            await asyncio.sleep(SELF_TUNING['mutation_interval'])
+        
+            # Final belief consolidation
+            final_bayes = await self.cognition.bayes_state
+            efficacy = final_bayes.get('proposal_success', 0.5) * (1 - final_bayes.get('fragility_prior', 0.3))
+            final_bayes['mutation_efficacy'] = efficacy
+            final_bayes['cycle_end'] = utc()
+        
+            await self.cognition.update_bayes_state(final_bayes)
+        
+            self.state = 'IDLE'
+        
+            return {
+                'ok': True,
+                'bayes_efficacy': efficacy,
+                'beliefs_updated': len(final_bayes['evidence_log']),
+                'operator_trust': {k: f'{v:.3f}' for k,v in final_bayes['operator_trust'].items()}
+            }
+    
+        except Exception as e:
+            logger.error(f"Mutation cycle failed: {e}")
+            self.state = 'IDLE'
+            return {'ok': False, 'error': str(e)}
 
-        # Meta-strategy gate — should_mutate only blocks on QUARANTINE/lock, never on mode
-        can_mutate, meta_reason = self.cog.meta.should_mutate(self.mutation_status)
-        if not can_mutate:
-            logger.warning("MUTATION_BLOCKED by meta: %s", meta_reason)
-            await self.write_ledger("MUTATION_BLOCKED", {"reason": meta_reason, "ts": utc()})
-            self.last_mutation_objective = f"BLOCKED: {meta_reason}"
-            return {"status": "meta_blocked", "reason": meta_reason}
-
-        async with self.mutation_lock:
-            try:
-                self.mutation_status = "MUTATING"
-                objective = directive or self._derive_objective()
-                self.last_mutation_objective = objective
-
-                # Begin durable transaction
-                txn_id = self.cog.begin_transaction(objective)
-                logger.info("MUTATION_START txn=%s: %s", txn_id, objective[:80])
-                self._meet("governance", {"event": "mutation_started", "objective": objective,
-                                          "fragility": self.fragility, "txn_id": txn_id})
-                await self.write_ledger("MUTATION_INITIATED", {
-                    "objective": objective, "fragility": self.fragility,
-                    "txn_id": txn_id, "ts": utc(),
-                })
-
-                # 1. Collect recent failure context for learning injection
-                failure_context = []
-                try:
-                    recent_failures = await self.ledger.scan_by_type("MUTATION_FAILED", max_pages=2)
-                    for r in recent_failures[:3]:
-                        d = r.get("payload", {})
-                        failure_context.append({
-                            "objective": d.get("objective", d.get("last_objective", ""))[:120],
-                            "reason": d.get("reason", d.get("error", ""))[:200],
-                            "file": str(d.get("touched_modules", d.get("shadow_fail_type", "")))[:80]
-                        })
-                except Exception:
-                    pass
-
-                # 1. Synthesize with failure history
-                proposal = await self.generator.synthesize(objective, self.get_state(), failure_context=failure_context)
-                if "error" in proposal and "code_map" not in proposal:
-                    self.cog.transactions.update(status="synthesis_failed")
-                    self.cog.transactions.close("synthesis_failed")
-                    self.cog.record_outcome(objective, [], False, rollback_reason=proposal["error"])
-                    await self._failure("SYNTHESIS_FAILED", proposal["error"])
-                    self.mutation_status = "IDLE"
-                    return {"status": "synthesis_failed", "error": proposal["error"]}
-
-                code_map = proposal.get("code_map", {})
-                if not code_map:
-                    self.cog.transactions.close("no_changes")
-                    self.mutation_status = "IDLE"
-                    return {"status": "no_changes"}
-
-                touched_modules = list(code_map.keys())
-                self.cog.transactions.update(touched_modules=touched_modules)
-
-                # 2. Shadow verify
-                sv_ok, sv_msg, sv_checks = await self.truth.verify_shadow(code_map)
-                self.cog.transactions.update(
-                    status="shadow_verified" if sv_ok else "shadow_vetoed",
-                    shadow_checks=sv_checks,
-                )
-                self._push("governance", {"event": "shadow_result", "ok": sv_ok,
-                                           "reason": sv_msg, "checks": sv_checks, "txn_id": txn_id})
-                if not sv_ok:
-                    self.cog.record_outcome(objective, touched_modules, False,
-                                            shadow_fail_type=sv_msg)
-                    self.cog.transactions.close("shadow_vetoed")
-                    await self._failure("SHADOW_VETO", sv_msg)
-                    await self._persist_cognition()
-                    self.mutation_status = "IDLE"
-                    return {"status": "shadow_vetoed", "reason": sv_msg}
-
-                # 3. Deploy
-                dr = await self.deployer.deploy(
-                    code_map, f"Orion auto: {objective[:80]} [{utc()[:16]}]"
-                )
-                if not dr.get("ok"):
-                    self.cog.record_outcome(objective, touched_modules, False,
-                                            rollback_reason=dr.get("error", ""))
-                    self.cog.transactions.close("deploy_failed")
-                    await self._failure("DEPLOY_FAILED", dr.get("error", ""))
-                    await self._persist_cognition()
-                    self.mutation_status = "IDLE"
-                    return {"status": "deploy_failed", "error": dr.get("error")}
-
-                parent_sha, new_sha = dr["parent_sha"], dr["new_sha"]
-                self.last_anchor_sha = parent_sha
-                self.probation_target_sha = new_sha
-                self.cog.transactions.update(
-                    status="probation",
-                    parent_sha=parent_sha,
-                    target_sha=new_sha,
-                    deploy_result=dr,
-                )
-
-                prob = {
-                    "status": "PROBATION", "target_sha": new_sha, "anchor_sha": parent_sha,
-                    "objective": objective, "fragility": self.fragility,
-                    "failure_streak": self.failure_streak, "txn_id": txn_id, "ts": utc(),
-                }
-                await self.write_ledger("DEPLOYMENT_INITIATED", prob)
-                self.mutation_status = "PROBATION"
-                logger.info("PROBATION: target=%s anchor=%s txn=%s", new_sha, parent_sha, txn_id)
-                asyncio.create_task(self._enforce_probation(prob))
-                return {"status": "probation_started", "target_sha": new_sha, "txn_id": txn_id}
-            except Exception as e:
-                logger.error("MUTATION_UNHANDLED: %s", e)
-                await self.write_ledger("MUTATION_FAILED", {"reason": str(e), "ts": utc()})
-                raise
-            finally:
-                if self.mutation_status == "MUTATING":
-                    self.mutation_status = "IDLE"
-                    logger.warning("MUTATION_LOCK_RELEASED: status reset to IDLE in finally")
     def _derive_objective(self) -> str:
         """
         Quantum-inspired objective selection:
@@ -976,16 +902,93 @@ class AutonomousInstitutionEngine:
             await asyncio.sleep(60)
 
     async def _loop_mutation(self):
-        # No env-var gate. No autonomy_mode gate. Mutation runs if IDLE.
-        # Jack controls mutation via /view/control DISABLE_MUTATION command if needed.
-        await asyncio.sleep(90)
         while True:
             try:
-                if self.mutation_status == "IDLE" and self.mutation_enabled:
-                    await self.run_mutation_cycle()
+                if self.state != 'MUTATING':
+                    await asyncio.sleep(1)
+                    continue
+            
+                # Bayesian belief propagation state
+                bayes_state = await self.cognition.bayes_state
+                if not bayes_state:
+                    bayes_state = {
+                        'proposal_success': 0.5,
+                        'fragility_prior': 0.3,
+                        'operator_trust': {a: 0.5 for a in AUTONOMOUS_AGENTS},
+                        'mutation_efficacy': 0.4,
+                        'evidence_log': []
+                    }
+            
+                # Fetch proposal candidates
+                proposals = await self.proposal_queue.get_pending(5)
+                if not proposals:
+                    await asyncio.sleep(2)
+                    continue
+            
+                # Bayesian proposal scoring
+                scored_proposals = []
+                for prop in proposals:
+                    agent = prop.get('agent', 'unknown')
+                
+                    # Update operator trust belief
+                    prior_trust = bayes_state['operator_trust'].get(agent, 0.5)
+                    prop['bayes_trust'] = prior_trust
+                
+                    # Fragility belief update
+                    fragility_prior = bayes_state['fragility_prior']
+                    prop['bayes_fragility'] = fragility_prior * 0.8 + 0.2 * (1 - prop.get('stability_score', 0.5))
+                
+                    # Success probability belief
+                    success_prior = bayes_state['proposal_success']
+                    prop['bayes_success'] = success_prior * 0.7 + 0.3 * prop.get('confidence', 0.5)
+                
+                    # Combined belief score
+                    prop['bayes_score'] = (prop['bayes_success'] * 0.5 + 
+                                         (1 - prop['bayes_fragility']) * 0.3 + 
+                                         prop['bayes_trust'] * 0.2)
+                    scored_proposals.append(prop)
+            
+                # Sort by Bayesian posterior probability
+                scored_proposals.sort(key=lambda x: x['bayes_score'], reverse=True)
+            
+                # Execute highest belief proposal
+                if scored_proposals:
+                    best_prop = scored_proposals[0]
+                    outcome = await self.execute_mutation(best_prop)
+                
+                    # Bayesian evidence update
+                    success = 1 if outcome.get('success', False) else 0
+                    bayes_state['evidence_log'].append({
+                        'success': success,
+                        'fragility': best_prop['bayes_fragility'],
+                        'trust': best_prop['bayes_trust'],
+                        'timestamp': utc()
+                    })
+                
+                    # Prune evidence log (keep last 50)
+                    bayes_state['evidence_log'] = bayes_state['evidence_log'][-50:]
+                
+                    # Update proposal success belief (exponential moving average)
+                    alpha = 0.1
+                    bayes_state['proposal_success'] = (1-alpha) * bayes_state['proposal_success'] + alpha * success
+                
+                    # Update fragility belief
+                    observed_fragility = 1 if outcome.get('rollback_triggered', False) else 0
+                    bayes_state['fragility_prior'] = (1-alpha) * bayes_state['fragility_prior'] + alpha * observed_fragility
+                
+                    # Update operator trust
+                    agent = best_prop.get('agent', 'unknown')
+                    bayes_state['operator_trust'][agent] = (1-alpha) * prior_trust + alpha * success
+                
+                    # Persist updated beliefs
+                    await self.cognition.update_bayes_state(bayes_state)
+                
+                    logger.info(f"Bayesian mutation: score={best_prop['bayes_score']:.3f}, "
+                               f"success={success}, updated_beliefs={len(bayes_state['evidence_log'])}")
+            
             except Exception as e:
-                logger.error("mutation: %s", e)
-            await asyncio.sleep(SELF_TUNING["mutation_interval"])
+                logger.error(f"Mutation loop error: {e}")
+                await asyncio.sleep(5)
 
     async def _loop_free_agency(self):
         """Agents generate directives continuously. Free agency gates whether they execute."""
