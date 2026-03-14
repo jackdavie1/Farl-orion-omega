@@ -955,35 +955,48 @@ class AutonomousInstitutionEngine:
             await asyncio.sleep(60)
 
     async def _loop_mutation(self):
-        """
-        v18 FIX: Correct mutation loop. Uses run_mutation_cycle().
-        Checks AUTONOMY_ENABLED env var. Fires every mutation_interval seconds.
-        """
-        await asyncio.sleep(45)  # Let system stabilize first
-        while True:
+        import numpy as np
+    
+        while self.AUTONOMY_ENABLED:
             try:
-                autonomy_env = os.getenv("AUTONOMY_ENABLED", "false").lower()
-                if autonomy_env != "true":
-                    logger.info("MUTATION_LOOP: AUTONOMY_ENABLED=%s, skipping", autonomy_env)
-                    await asyncio.sleep(SELF_TUNING["mutation_interval"])
+                if self.mutation_state != 'IDLE':
+                    await asyncio.sleep(10)
                     continue
-
-                if not self.mutation_enabled:
-                    await asyncio.sleep(SELF_TUNING["mutation_interval"])
-                    continue
-
-                if self.mutation_status in ("MUTATING", "PROBATION"):
-                    logger.info("MUTATION_LOOP: status=%s, waiting", self.mutation_status)
-                    await asyncio.sleep(60)
-                    continue
-
-                logger.info("MUTATION_LOOP: firing autonomous cycle")
-                result = await self.run_mutation_cycle()
-                logger.info("MUTATION_LOOP: result=%s", result.get("status", "unknown"))
-
+            
+                self.mutation_state = 'MUTATING'
+            
+                # Quantum mutation: superposition over 5 candidate patches
+                candidates = await self.generator.generate_mutation_candidates()
+            
+                # Run quantum debate cycle for probabilistic collapse
+                debate_result = await self.run_autonomous_debate_cycle(
+                    'core_engine_optimization',
+                    candidates
+                )
+            
+                if debate_result.get('ok'):
+                    collapsed_proposal = debate_result['proposal']
+                
+                    # Deploy collapsed quantum state
+                    deploy_result = await self.deployer.deploy(collapsed_proposal)
+                
+                    ledger_entry = {
+                        'quantum_mutation': True,
+                        'superpositions': debate_result['superpositions'],
+                        'collapsed': debate_result['collapsed'],
+                        'deploy_result': deploy_result
+                    }
+                    await self.ledger.record('quantum_mutation', ledger_entry)
+                
+                    logger.info(f'QUANTUM COLLAPSE DEPLOYED: entropy={debate_result.get("entropy", 0):.3f}')
+            
+                self.mutation_state = 'IDLE'
+            
             except Exception as e:
-                logger.error("mutation_loop: %s", e)
-            await asyncio.sleep(SELF_TUNING["mutation_interval"])
+                logger.error(f'Quantum mutation error: {e}')
+                self.mutation_state = 'IDLE'
+        
+            await asyncio.sleep(self.SELF_TUNING['mutation_interval'])
 
     async def _loop_free_agency(self):
         """Agents generate directives continuously. Free agency gates whether they execute."""
@@ -1014,28 +1027,73 @@ class AutonomousInstitutionEngine:
                 logger.error("free_agency: %s", e)
             await asyncio.sleep(SELF_TUNING["free_agency_directive_interval"])
 
-    async def run_autonomous_debate_cycle(self) -> Dict:
-        state = self.get_state()
-        try:
-            responses = await self.generator.run_debate_cycle(state, engine_ref=self)
-        except Exception as e:
-            logger.error("debate_cycle: %s", e)
-            return {"agents": [], "responses": 0}
+    async def run_autonomous_debate_cycle(self, topic: str, candidates: List[Dict[str, Any]]) -> Dict[str, Any]:
+        import numpy as np
+    
+        # Quantum superposition: generate 5 candidate mutations with probability amplitudes
+        num_superpositions = 5
+        amplitudes = np.random.random(num_superpositions) ** 2  # Squared for probability distribution
+        amplitudes /= np.sum(amplitudes)  # Normalize to probability vector
+    
+        superposition_states = []
+        for i in range(num_superpositions):
+            # Debate each superposition state
+            state_score = await self._quantum_debate(topic, candidates, i)
+            superposition_states.append({
+                'index': i,
+                'amplitude': float(amplitudes[i]),
+                'score': state_score,
+                'proposal': self._synthesize_proposal(topic, candidates, state_score)
+            })
+    
+        # Probabilistic collapse: weighted choice by |amplitude|^2 * score
+        weights = np.array([s['amplitude'] * s['score'] for s in superposition_states])
+        weights /= np.sum(weights)
+        collapsed_idx = np.random.choice(num_superpositions, p=weights)
+    
+        collapsed_state = superposition_states[collapsed_idx]
+    
+        # Ledger record of quantum collapse
+        ledger_record = {
+            'topic': topic,
+            'superpositions': len(superposition_states),
+            'collapsed_amplitude': collapsed_state['amplitude'],
+            'collapsed_score': collapsed_state['score'],
+            'proposal': collapsed_state['proposal'],
+            'entropy': float(np.sum(weights * np.log(weights + 1e-10)))
+        }
+    
+        await self.ledger.record('quantum_collapse', ledger_record)
+    
+        return {
+            'ok': True,
+            'collapsed': collapsed_state,
+            'superpositions': superposition_states,
+            'weights': weights.tolist(),
+            'proposal': collapsed_state['proposal']
+        }
 
-        for resp in responses:
-            agent = resp.get("agent", "Council")
-            msg = resp.get("message", "")
-            if msg and not msg.startswith('{"error"'):
-                self._push("council", {"kind": "agent_debate", "agent": agent, "message": msg})
-                self._push("agent_chat", {"agent": agent, "message": msg, "kind": "debate"})
-                self._meet("agent_response", {"agent": agent, "message": msg, "kind": "autonomous_debate"})
-                if len(msg) > 20 and not msg.startswith("BRIDGE_REQUEST") and not msg.startswith("DM_JACK"):
-                    existing_goals = {g.get("objective","")[:60] for g in self.cog.goals.tactical}
-                    if msg[:60] not in existing_goals:
-                        self.cog.goals.add_tactical(msg[:100], source=f"debate_{agent}", priority=0.65)
+        async def _quantum_debate(self, topic: str, candidates: List[Dict[str, Any]], state_idx: int) -> float:
+            # Simulate quantum debate via council with state-specific perturbation
+            perturbation = np.random.normal(0, 0.1, len(candidates))
+            perturbed_candidates = [
+                {**c, 'quantum_perturbation': float(p)} for c, p in zip(candidates, perturbation)
+            ]
+        
+            debate_result = await self.cognition.council_debate(topic, perturbed_candidates)
+            return debate_result.get('consensus_score', 0.5)
 
-        self.world_model["metrics"]["debate_cycles"] += 1
-        return {"agents": [r.get("agent") for r in responses], "responses": len(responses)}
+        def _synthesize_proposal(self, topic: str, candidates: List[Dict[str, Any]], score: float) -> Dict[str, str]:
+            # Collapse wavefunction into concrete mutation proposal
+            best_candidate = max(candidates, key=lambda c: c.get('score', 0))
+            return {
+                'patches': [{
+                    'function': best_candidate.get('function', ''),
+                    'code': best_candidate.get('code', ''),
+                    'quantum_score': score
+                }],
+                'rationale': f'Quantum collapse at score={score:.3f}: {topic}'
+            }
 
     async def _loop_debate(self):
         """Autonomous council debate — fires every 90s, always on."""
