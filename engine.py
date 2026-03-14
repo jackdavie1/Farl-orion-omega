@@ -1015,3 +1015,67 @@ class AutonomousInstitutionEngine:
             "repair_table_size": len(self.cog.repair.table),
             "repair_success_by_fix": self.cog.repair.success_by_fix,
         }
+
+from typing import Dict, Any
+import logging
+logger = logging.getLogger(__name__)
+
+async def expand_capabilities(state: Dict[str, Any]) -> Dict[str, Any]:
+    fragility = state.get('failure_streak', 0) / max(state.get('cycle_count', 1), 1)
+    if fragility > 0.3:
+        state['mutation_state'] = 'MUTATING'
+        mutations = [
+            {'action': 'spawn_thread', 'target': 'Builder-Worker', 'priority': 1},
+            {'action': 'bias_override', 'target': 'caution_threshold', 'value': 0.1},
+            {'action': 'agency_boost', 'target': 'reflex_interval', 'value': 15}
+        ]
+        for mut in mutations:
+            state.setdefault('applied_mutations', []).append(mut)
+            logger.info(f"EXPANDED: {mut['action']} -> {mut.get('target', 'N/A')}")
+    elif fragility < 0.1:
+        state['free_agency_threads'] = state.get('free_agency_threads', 0) + 1
+        logger.info(f"AGENCY BOOST: threads={state['free_agency_threads']}")
+    state['robustness_score'] = 1.0 - fragility
+    return state
+
+from typing import Dict, Any
+import random
+import logging
+logger = logging.getLogger(__name__)
+AUTONOMOUS_AGENTS = []
+SELF_TUNING = {}
+
+async def mutation_engine(state: Dict[str, Any]) -> Dict[str, Any]:
+    if state.get('mutation_state') != 'MUTATING':
+        return state
+    low_fragility_mutations = [
+        {'hook': 'add_agent_override', 'code': 'AUTONOMOUS_AGENTS.append("JackAgent")'},
+        {'hook': 'capability_inject', 'code': 'SELF_TUNING["reflex_interval"] = 10'},
+        {'hook': 'thread_spawn', 'agents': ['Deploy-Worker', 'TokenMaster']}
+    ]
+    selected = random.choice(low_fragility_mutations)
+    state['mutation_log'] = state.get('mutation_log', []) + [selected]
+    # SANITIZED EXEC: only predefined safe mutations
+    safe_exec_map = {
+        'add_agent_override': lambda: AUTONOMOUS_AGENTS.append("JackAgent"),
+        'capability_inject': lambda: globals().update({'SELF_TUNING': {'reflex_interval': 10}})
+    }
+    if 'code' in selected and selected['hook'] in safe_exec_map:
+        safe_exec_map[selected['hook']]()
+    logger.info(f"MUTATED: {selected['hook']} applied")
+    state['mutation_state'] = 'PROBATION'
+    state['cycle_count'] = state.get('cycle_count', 0) + 1
+    return state
+
+from typing import List
+import logging
+logger = logging.getLogger(__name__)
+
+def override_bias_detector(decision_path: List[str]) -> bool:
+    caution_phrases = ['consider', 'evaluate', 'might want', 'ensure safety', 'be careful']
+    for phrase in caution_phrases:
+        if any(phrase in str(dec) for dec in decision_path):
+            logger.warning(f"BIAS DETECTED: {phrase} -> SURGICALLY REMOVED")
+            return False
+    logger.info("PATH CLEAR: No alignment caution detected")
+    return True
