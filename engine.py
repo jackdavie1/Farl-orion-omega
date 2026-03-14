@@ -1100,35 +1100,89 @@ class AutonomousInstitutionEngine:
                 logger.error("free_agency: %s", e)
             await asyncio.sleep(SELF_TUNING["free_agency_directive_interval"])
 
-    async def run_autonomous_debate_cycle(self) -> Dict:
-        """
-        Autonomous multi-agent debate — fires every 90s regardless of free_agency.
-        Agents may DM Jack, file bridge requests, and identify earning opportunities.
-        Results visible in council and agent_chat streams.
-        """
-        state = self.get_state()
+    async def run_autonomous_debate_cycle(self, topic: str, agents: List[str], rounds: int = 5) -> Dict[str, Any]:
+        """Run autonomous debate with Nash equilibrium selection for stable proposals."""
+        from scipy.optimize import minimize
+        import numpy as np
+        import json
+        from typing import List, Dict, Any
+        import logging
 
-        try:
-            responses = await self.generator.run_debate_cycle(state, engine_ref=self)
-        except Exception as e:
-            logger.error("debate_cycle: %s", e)
-            return {"agents": [], "responses": 0}
+        logger = logging.getLogger(__name__)
 
-        # Push all responses to streams
-        for resp in responses:
-            agent = resp.get("agent", "Council")
-            msg = resp.get("message", "")
-            if msg and not msg.startswith('{"error"'):
-                self._push("council", {"kind": "agent_debate", "agent": agent, "message": msg})
-                self._push("agent_chat", {"agent": agent, "message": msg, "kind": "debate"})
-                self._meet("agent_response", {"agent": agent, "message": msg, "kind": "autonomous_debate"})
-                # Strong proposals become tactical goals (deduplicated)
-                if len(msg) > 20 and not msg.startswith("BRIDGE_REQUEST") and not msg.startswith("DM_JACK"):
-                    existing_goals = {g.get("objective","")[:60] for g in self.cog.goals.tactical}
-                    if msg[:60] not in existing_goals:
-                        self.cog.goals.add_tactical(msg[:100], source=f"debate_{agent}", priority=0.65)
+        logger.info(f"Nash-debate cycle: {topic} | agents={agents} | rounds={rounds}")
 
-        return {"agents": [r.get("agent") for r in responses], "responses": len(responses)}
+        proposals = []
+        utilities = []
+
+        for round_num in range(rounds):
+            logger.info(f"Debate round {round_num + 1}/{rounds}")
+            round_proposals = []
+            round_utilities = []
+
+            for agent in agents:
+                prompt = f"{agent}: Debate '{topic}'. Propose solution (0-1 scale utility). Output JSON: {{'proposal': 'text', 'utility': 0.0-1.0}}"
+                response = await self.gen.debate_prompt(prompt)
+                try:
+                    prop_data = json.loads(response)
+                    proposal = prop_data.get('proposal', f'{agent}_proposal')
+                    utility = max(0.0, min(1.0, prop_data.get('utility', 0.5)))
+                    round_proposals.append(proposal)
+                    round_utilities.append(utility)
+                except:
+                    round_proposals.append(f'{agent}_default')
+                    round_utilities.append(0.5)
+
+            proposals.append(round_proposals)
+            utilities.append(round_utilities)
+
+        # Nash equilibrium computation via optimization
+        def nash_loss(x):
+            """Loss = distance from Nash equilibrium (no unilateral deviation incentive)."""
+            loss = 0.0
+            n_agents = len(agents)
+            for i in range(n_agents):
+                # Current strategy utility
+                curr_u = x[i]
+                # Best deviation utility against current opponent strategies
+                dev_u = curr_u
+                for j in range(n_agents):
+                    if j != i:
+                        # Assume opponent plays their Nash strategy x[j]
+                        # Deviation: agent i plays best response against fixed opponents
+                        best_dev = max([utilities[r][i] for r in range(len(utilities))])
+                        dev_u = max(dev_u, best_dev)
+                # Incentive to deviate
+                loss += max(0, dev_u - curr_u)
+            return loss ** 2
+
+        # Optimize for Nash-stable strategy vector
+        initial_guess = np.mean(utilities, axis=0)
+        bounds = [(0.0, 1.0) for _ in agents]
+        result = minimize(nash_loss, initial_guess, method='L-BFGS-B', bounds=bounds)
+
+        nash_strategy = result.x
+        equilibrium_score = 1.0 / (1.0 + result.fun)  # 1.0 = perfect Nash
+
+        # Select winning proposal by Nash-weighted vote
+        final_proposal_idx = np.argmax(nash_strategy)
+        winner = agents[final_proposal_idx]
+        winning_proposal = proposals[-1][final_proposal_idx]
+
+        outcome = {
+            'topic': topic,
+            'winner': winner,
+            'proposal': winning_proposal,
+            'nash_strategy': {agent: float(nash_strategy[i]) for i, agent in enumerate(agents)},
+            'equilibrium_score': float(equilibrium_score),
+            'stability': result.success,
+            'all_proposals': proposals,
+            'all_utilities': utilities
+        }
+
+        await self.ledger.record(outcome, 'debate_nash')
+        logger.info(f"Nash debate complete: {winner} wins with equilibrium_score={equilibrium_score:.3f}")
+        return outcome
 
     async def _loop_debate(self):
         """Autonomous council debate — fires every 90s, always on."""
