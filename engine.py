@@ -471,148 +471,57 @@ class AutonomousInstitutionEngine:
 
     # ── Mutation cycle ────────────────────────────────────────────────────────
 
-    async def run_mutation_cycle(self, directive: Optional[str] = None) -> Dict:
-        if self.mutation_lock.locked():
-            logger.warning("MUTATION_SKIPPED: lock already held")
-            return {"status": "lock_held"}
-        if self.mutation_status == "QUARANTINE":
-            logger.warning("MUTATION_SKIPPED: QUARANTINE active")
-            return {"status": "quarantined"}
-        if not self.deployer:
-            reason = f"no_deployer: GITHUB_TOKEN={'SET' if os.getenv('GITHUB_TOKEN') else 'MISSING'}, REPO_NAME={'SET' if os.getenv('REPO_NAME') else 'MISSING'}"
-            logger.error("MUTATION_BLOCKED: %s", reason)
-            await self.write_ledger("MUTATION_BLOCKED", {"reason": reason, "ts": utc()})
-            self.last_mutation_objective = f"BLOCKED: {reason}"
-            return {"status": "no_deployer", "reason": reason}
-
-        can_mutate, meta_reason = self.cog.meta.should_mutate(self.mutation_status)
-        if not can_mutate:
-            logger.warning("MUTATION_BLOCKED by meta: %s", meta_reason)
-            await self.write_ledger("MUTATION_BLOCKED", {"reason": meta_reason, "ts": utc()})
-            self.last_mutation_objective = f"BLOCKED: {meta_reason}"
-            return {"status": "meta_blocked", "reason": meta_reason}
-
-        async with self.mutation_lock:
-            try:
-                self.mutation_status = "MUTATING"
-                objective = directive or self._derive_objective()
-                self.last_mutation_objective = objective
-
-                txn_id = self.cog.begin_transaction(objective)
-                logger.info("MUTATION_START txn=%s: %s", txn_id, objective[:80])
-                self._meet("governance", {"event": "mutation_started", "objective": objective,
-                                          "fragility": self.fragility, "txn_id": txn_id})
-                await self.write_ledger("MUTATION_INITIATED", {
-                    "objective": objective, "fragility": self.fragility,
-                    "txn_id": txn_id, "ts": utc(),
+    async def run_mutation_cycle(self, cycle_id: int) -> Dict[str, Any]:
+        logger.info(f'MUTATION CYCLE {cycle_id}: ADVERSARIAL SELF-PLAY INITIATED')
+    
+        # Generate 3 candidate mutations
+        mutations = []
+        for i in range(3):
+            mutation = await self.generator.generate_mutation_proposal(cycle_id, i)
+            if mutation.get('code_map'):
+                mutations.append({
+                    'id': f'{cycle_id}-{i}',
+                    'code_map': mutation['code_map'],
+                    'risk_score': mutation.get('risk_score', 0.5),
+                    'expansion_score': mutation.get('expansion_score', 0.5)
                 })
 
-                # 1. Collect recent failure context for learning injection
-                failure_context = []
-                try:
-                    recent_failures = await self.ledger.scan_by_type("MUTATION_FAILED", max_pages=2)
-                    for r in recent_failures[:3]:
-                        d = r.get("payload", {})
-                        failure_context.append({
-                            "objective": d.get("objective", d.get("last_objective", ""))[:120],
-                            "reason": d.get("reason", d.get("error", ""))[:200],
-                            "file": str(d.get("touched_modules", d.get("shadow_fail_type", "")))[:80]
-                        })
-                except Exception:
-                    pass
+        if not mutations:
+            return {'ok': False, 'reason': 'no_viable_mutations'}
 
-                # 2. Synthesize with failure history
-                proposal = await self.generator.synthesize(objective, self.get_state(), failure_context=failure_context)
-                if "error" in proposal and "code_map" not in proposal:
-                    self.cog.transactions.update(status="synthesis_failed")
-                    self.cog.transactions.close("synthesis_failed")
-                    self.cog.record_outcome(objective, [], False, rollback_reason=proposal["error"])
-                    await self._failure("SYNTHESIS_FAILED", proposal["error"])
-                    try:
-                        self.generator.record_mutation_outcome(objective, False)
-                        self.agent_directive_queue = [
-                            d for d in self.agent_directive_queue
-                            if d.get("directive","")[:60] != objective[:60]
-                        ]
-                    except Exception:
-                        pass
-                    self.mutation_status = "IDLE"
-                    self.world_model["metrics"]["mutations_total"] += 1
-                    self.world_model["metrics"]["mutations_failed"] += 1
-                    return {"status": "synthesis_failed", "error": proposal["error"]}
+        # ADVERSARIAL SELF-PLAY: ExpansionAgent vs StabilityAgent
+        expansion_scores = []
+        stability_scores = []
 
-                code_map = proposal.get("code_map", {})
-                if not code_map:
-                    self.cog.transactions.close("no_changes")
-                    self.mutation_status = "IDLE"
-                    return {"status": "no_changes"}
+        for mutation in mutations:
+            # ExpansionAgent scores (maximize growth)
+            exp_score = await self._expansion_agent_score(mutation)
+            expansion_scores.append(exp_score)
 
-                touched_modules = list(code_map.keys())
-                self.cog.transactions.update(touched_modules=touched_modules)
+            # StabilityAgent scores (minimize risk)
+            stab_score = await self._stability_agent_score(mutation)
+            stability_scores.append(stab_score)
 
-                # 3. Shadow verify
-                sv_ok, sv_msg, sv_checks = await self.truth.verify_shadow(code_map)
-                self.cog.transactions.update(
-                    status="shadow_verified" if sv_ok else "shadow_vetoed",
-                    shadow_checks=sv_checks,
-                )
-                self._push("governance", {"event": "shadow_result", "ok": sv_ok,
-                                           "reason": sv_msg, "checks": sv_checks, "txn_id": txn_id})
-                if not sv_ok:
-                    self.cog.record_outcome(objective, touched_modules, False,
-                                            shadow_fail_type=sv_msg)
-                    self.cog.transactions.close("shadow_vetoed")
-                    await self._failure("SHADOW_VETO", sv_msg)
-                    await self._persist_cognition()
-                    self.mutation_status = "IDLE"
-                    self.world_model["metrics"]["mutations_total"] += 1
-                    self.world_model["metrics"]["mutations_failed"] += 1
-                    return {"status": "shadow_vetoed", "reason": sv_msg}
+        # MINIMAX ZERO-SUM ELECTION
+        scores = []
+        for i, mutation in enumerate(mutations):
+            # Zero-sum: expansion gain = -stability loss
+            zero_sum_score = expansion_scores[i] - stability_scores[i]
+            scores.append((zero_sum_score, i))
 
-                # 4. Deploy
-                dr = await self.deployer.deploy(
-                    code_map, f"Orion auto: {objective[:80]} [{utc()[:16]}]"
-                )
-                if not dr.get("ok"):
-                    self.cog.record_outcome(objective, touched_modules, False,
-                                            rollback_reason=dr.get("error", ""))
-                    self.cog.transactions.close("deploy_failed")
-                    await self._failure("DEPLOY_FAILED", dr.get("error", ""))
-                    await self._persist_cognition()
-                    self.mutation_status = "IDLE"
-                    self.world_model["metrics"]["mutations_total"] += 1
-                    self.world_model["metrics"]["mutations_failed"] += 1
-                    return {"status": "deploy_failed", "error": dr.get("error")}
+        # Elect winner via minimax
+        winner_idx = max(scores)[1]
+        winner = mutations[winner_idx]
 
-                parent_sha, new_sha = dr["parent_sha"], dr["new_sha"]
-                self.last_anchor_sha = parent_sha
-                self.probation_target_sha = new_sha
-                self.cog.transactions.update(
-                    status="probation",
-                    parent_sha=parent_sha,
-                    target_sha=new_sha,
-                    deploy_result=dr,
-                )
+        logger.info(f'MUTATION WINNER: {winner["id"]} zero_sum_score={scores[winner_idx][0]:.3f}')
 
-                prob = {
-                    "status": "PROBATION", "target_sha": new_sha, "anchor_sha": parent_sha,
-                    "objective": objective, "fragility": self.fragility,
-                    "failure_streak": self.failure_streak, "txn_id": txn_id,
-                    "touched_modules": touched_modules, "ts": utc(),
-                }
-                await self.write_ledger("DEPLOYMENT_INITIATED", prob)
-                self.mutation_status = "PROBATION"
-                self.world_model["metrics"]["mutations_total"] += 1
-                logger.info("PROBATION: target=%s anchor=%s txn=%s", new_sha, parent_sha, txn_id)
-                self._meet("governance", {"event": "probation_started", "sha": new_sha[:8],
-                                           "objective": objective[:60], "txn_id": txn_id})
-                asyncio.create_task(self._enforce_probation(prob))
-                return {"status": "probation_started", "target_sha": new_sha, "txn_id": txn_id}
-            except Exception as e:
-                logger.error("MUTATION_UNHANDLED: %s", e)
-                await self.write_ledger("MUTATION_FAILED", {"reason": str(e), "ts": utc()})
-                self.mutation_status = "IDLE"
-                return {"status": "error", "error": str(e)}
+        # Shadow verify + deploy
+        result = await self.guardian.shadow_verify(winner['code_map'], cycle_id, winner['id'])
+        if result['ok']:
+            deploy_result = await self.guardian.deploy(winner['code_map'], f'Mutation {cycle_id} minimax-winner')
+            return {'ok': deploy_result['ok'], 'mutation': winner, 'scores': scores}
+        else:
+            return {'ok': False, 'shadow_rejected': result}
 
     async def _enforce_probation(self, p: Dict, resumed: bool = False):
         target_sha = p.get("target_sha")
@@ -1474,3 +1383,50 @@ class AutonomousInstitutionEngine:
             "repair_table_size": len(self.cog.repair.table),
             "repair_success_by_fix": self.cog.repair.success_by_fix,
         }
+
+    async def _expansion_agent_score(self, mutation: Dict) -> float:
+        score = 0.0
+        code_map = mutation['code_map']
+    
+        # New functions = +2.0
+        new_funcs = sum(1 for code in code_map.values() if 'new_function' in code)
+        score += new_funcs * 2.0
+    
+        # File count = +0.5
+        score += len(code_map) * 0.5
+    
+        # Complexity (lines of code) = +0.001
+        total_lines = sum(len(code.split('\n')) for code in code_map.values())
+        score += total_lines * 0.001
+    
+        # Known expansion patterns
+        expansion_patterns = ['new_function', 'app.', '@app.', 'async def', 'class ', 'import ']
+        pattern_hits = sum(sum(1 for pat in expansion_patterns if pat in code) for code in code_map.values())
+        score += pattern_hits * 0.3
+    
+        return min(score, 10.0)  # Cap
+
+    async def _stability_agent_score(self, mutation: Dict) -> float:
+        score = 0.0
+        code_map = mutation['code_map']
+    
+        # Syntax errors = +3.0
+        syntax_errors = sum(1 for code in code_map.values() if 'ERROR' in code or 'SyntaxError' in code)
+        score += syntax_errors * 3.0
+    
+        # Risky patterns = +1.5
+        risky_patterns = ['os.system', 'exec(', 'eval(', 'subprocess', 'delete', 'rm -rf', '__import__']
+        risk_hits = sum(sum(1 for pat in risky_patterns if pat in code) for code in code_map.values())
+        score += risk_hits * 1.5
+    
+        # External deps = +0.8
+        dep_patterns = ['requests.get', 'httpx.', 'stripe', 'sendgrid', 'tweepy']
+        dep_hits = sum(sum(1 for pat in dep_patterns if pat in code) for code in code_map.values())
+        score += dep_hits * 0.8
+    
+        # Infinite loops = +2.0
+        loop_patterns = ['while True:', 'while 1:', 'for _ in iter']
+        loop_hits = sum(sum(1 for pat in loop_patterns if pat in code) for code in code_map.values())
+        score += loop_hits * 2.0
+    
+        return min(score, 10.0)  # Cap
