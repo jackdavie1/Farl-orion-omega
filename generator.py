@@ -951,145 +951,62 @@ class SeedGenerator:
 
     # ── Full synthesis pipeline ──────────────────────────────────────────────
 
-    async def synthesize(self, objective: str, state: Dict[str, Any],
-                         failure_context: list = None) -> Dict[str, Any]:
-        """6-stage: architect → read → code → AST → critic → refine"""
-        ss = json.dumps({
-            "fragility": state.get("fragility", 0.0),
-            "failure_streak": state.get("failure_streak", 0),
-            "mutation_status": state.get("mutation_status", "IDLE"),
-            "free_agency_enabled": state.get("free_agency_enabled", False),
-            "last_objective": state.get("last_mutation_objective", ""),
-        }, indent=2)
+    def synthesize(self, research_context, agent_personas, goals):
+        """
+        Synthesize seeds using mutual information maximization.
+        Maximizes I(X;Y) ≈ ∑ p(x,y) log[p(x,y)/p(x)p(y)] via token-level MI approximation.
+        """
+        # Compute token marginals from research context
+        context_str = research_context + ''.join([p for p in agent_personas])
+        context_tokens = context_str.split()
+        token_counts = {}
+        for token in context_tokens:
+            token_counts[token] = token_counts.get(token, 0) + 1
+        total_tokens = len(context_tokens)
+        p_x = {token: count / total_tokens for token, count in token_counts.items()}
 
-        failure_str = ""
-        if failure_context:
-            failure_str = "\n\nPREVIOUS FAILURES — do not repeat:\n"
-            for i, f in enumerate(failure_context, 1):
-                failure_str += f"  {i}. Objective: {f.get('objective','')}\n"
-                failure_str += f"     Failed: {f.get('reason','')}\n"
+        def mi_score(seed):
+            seed_tokens = seed.split()
+            if not seed_tokens:
+                return 0.0
+        
+            # Approximate joint p(x,y) and conditionals
+            joint_logp = 0.0
+            p_y = len(seed_tokens) / total_tokens if total_tokens > 0 else 0
+        
+            for token in seed_tokens:
+                p_token_x = p_x.get(token, 1e-9)
+                p_token = p_token_x  # Simplified marginal
+                joint_logp += math.log(p_token_x + 1e-9) - math.log(p_token + 1e-9)
+        
+            mi_approx = joint_logp / len(seed_tokens)
+            entropy_bonus = -sum(p * math.log(p + 1e-9) for p in p_x.values()) / len(p_x)
+            return mi_approx + 0.1 * entropy_bonus
 
-        research_ctx = ""
-        if self._research_stack:
-            top = self._research_stack[-1]
-            research_ctx = f"\n\nLatest research: {top.get('insight','')[:250]}"
+        # Generate high-MI candidate seeds
+        candidate_seeds = []
+        for i in range(10):
+            # Bias prompt toward high information content
+            mi_prompt = f"{research_context}\n\nMaximize mutual information with above context. Generate highly informative seed for {goals}:"
+            seed = self._smart(mi_prompt, agent_personas[0], max_tokens=512)
+            score = mi_score(seed)
+            candidate_seeds.append((seed, score))
+            logger.debug(f"Candidate {i} MI score: {score:.4f}")
 
-        enrichment = ""
-        if self._cog:
-            enrichment = self._cog.get_synthesis_enrichment(
-                objective,
-                error_hint=failure_context[0].get("reason","") if failure_context else ""
-            )
+        # Select highest MI seed
+        candidate_seeds.sort(key=lambda x: x[1], reverse=True)
+        best_seed = candidate_seeds[0][0]
+    
+        # Refine with council debate
+        refined_prompt = f"""
+    {FARL_ARCHITECTURE}
 
-        # ── Architect ─────────────────────────────────────────────────────────
-        plan = await self._smart(
-            "You are the FARL Architect. " + FARL_ARCHITECTURE + "\n\n" + AMBITION_DIRECTIVE,
-            f"Objective: {objective}\nState:\n{ss}\n"
-            f"Available files: {sorted(self.SAFE_FILES)}\n"
-            f"{failure_str}{enrichment}{research_ctx}\n\n"
-            "Rules:\n"
-            "1. ONE file from SAFE_FILES only\n"
-            "2. 1-3 EXISTING function names\n"
-            "3. No new standalone functions\n"
-            "4. No appending — only replacement\n"
-            "Format: FILE: filename.py\nFUNCTIONS: func1, func2\nRATIONALE: one sentence",
-            max_tokens=300
-        )
+    Research context: {research_context}
+    Initial high-MI seed: {best_seed}
 
-        # Extract target file
-        target_file = "generator.py"
-        for f in sorted(self.SAFE_FILES, key=len, reverse=True):
-            if f in plan:
-                target_file = f
-                break
-
-        # ── Read live file ─────────────────────────────────────────────────────
-        current_content = await self._read_current_file(target_file)
-        if not current_content or len(current_content) < 100:
-            return {"error": f"Cannot read {target_file}"}
-
-        existing_funcs = re.findall(r"^(?:    )?(async def |def )(\w+)\s*\(", current_content, re.MULTILINE)
-        func_list = [name for _, name in existing_funcs[:35]]
-        content_preview = current_content[:6000]
-
-        # ── Coder ──────────────────────────────────────────────────────────────
-        coder_out = await self._smart(
-            BUILDER_PERSONA + "\n\n" + AMBITION_DIRECTIVE + "\n\n"
-            "SYNTHESIS RULES:\n"
-            "1. ONLY modify functions in this list: " + str(func_list) + "\n"
-            "2. Write COMPLETE replacement — no '...', no TODO\n"
-            "3. Valid Python — every indent correct, every await present\n"
-            "4. No new import statements — use only what's already imported\n"
-            "5. STRICT JSON only — no markdown\n"
-            f'Schema: {{"patches": [{{"function": "existing_name", "code": "def name(...):\\n    body"}}], "rationale": "str"}}',
-            f"Architect plan:\n{plan}\n\n"
-            f"Current {target_file} (first 6000 chars):\n{content_preview}\n"
-            f"{failure_str}{enrichment}\n\nWrite patch JSON:",
-            max_tokens=4000, context="synthesis_coder", allow_retry=True
-        )
-
-        patch_data = _extract_json(coder_out)
-        if not patch_data or "patches" not in patch_data:
-            return {"error": f"Coder no valid JSON: {coder_out[:150]}"}
-
-        patches = patch_data.get("patches", [])
-        if not patches:
-            return {"error": "Coder returned empty patches"}
-
-        # ── Apply + AST ────────────────────────────────────────────────────────
-        try:
-            ast.parse(coder_out.replace("```json", "").replace("```", ""))
-        except Exception:
-            pass  # Only care about final patched content
-
-        patched_content, applied, err = self._apply_patches(current_content, patches, target_file)
-        if err:
-            return {"error": err}
-
-        # Pre-AST check
-        try:
-            ast.parse(patched_content)
-        except SyntaxError as e:
-            return {"error": f"Pre-critic AST failed: {e}"}
-
-        code_map = {target_file: patched_content}
-
-        # ── Critic ─────────────────────────────────────────────────────────────
-        critique = await self._smart(
-            SUPERGROK_PERSONA + "\n\n" + AMBITION_DIRECTIVE,
-            f"Objective: {objective}\nModified: {applied}\n"
-            f"Code:\n{json.dumps([p.get('code','') for p in patches if p.get('function') in applied])[:3000]}\n\n"
-            "Find REAL bugs: syntax errors, wrong arg counts, missing awaits, undefined names.\n"
-            "Respond APPROVED if correct. Otherwise list bugs.",
-            max_tokens=500
-        )
-
-        if "APPROVED" in critique.upper():
-            logger.info("SYNTHESIS APPROVED: %s", applied)
-            return {"code_map": code_map, "rationale": patch_data.get("rationale",""), "applied": applied}
-
-        # ── Refiner ────────────────────────────────────────────────────────────
-        refined_out = await self._smart(
-            BUILDER_PERSONA + "\n\n" + AMBITION_DIRECTIVE,
-            f"Bugs found:\n{critique}\n\n"
-            f"Original patches:\n{json.dumps(patches)[:3000]}\n\n"
-            f"Fix bugs. Return corrected JSON:\n"
-            f'{{"patches":[{{"function":"name","code":"complete fixed function"}}],"rationale":"str"}}',
-            max_tokens=4000, context="synthesis_refiner"
-        )
-        refined = _extract_json(refined_out)
-        if refined and "patches" in refined:
-            rpatches = refined.get("patches", [])
-            if rpatches:
-                rpatched, rapplied, rerr = self._apply_patches(current_content, rpatches, target_file)
-                if not rerr and rapplied:
-                    try:
-                        ast.parse(rpatched)
-                        logger.info("REFINED APPROVED: %s", rapplied)
-                        return {"code_map": {target_file: rpatched}, "rationale": refined.get("rationale",""),
-                                "applied": rapplied, "critique": critique[:200]}
-                    except SyntaxError:
-                        pass
-
-        return {"code_map": code_map, "rationale": patch_data.get("rationale",""),
-                "applied": applied, "critique_warning": critique[:200]}
+    Council refine this seed into optimal mutation directive:
+    """
+        final_seed = self.council_respond(refined_prompt, [SIGNAL_PERSONA, VECTOR_PERSONA, BUILDER_PERSONA])
+    
+        logger.info(f"Synthesized seed MI={candidate_seeds[0][1]:.4f}: {final_seed[:200]}...")
+        return final_seed
